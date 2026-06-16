@@ -554,6 +554,10 @@
 
   // ---- init ----
   (async function init() {
+    const tagline = $('#tagline');
+    if (tagline && typeof window.FAA_randomQuote === 'function') {
+      tagline.textContent = window.FAA_randomQuote();
+    }
     const stored = await chrome.storage.local.get(STORAGE_KEYS.RECIPE);
     state.recipe = stored[STORAGE_KEYS.RECIPE] || null;
     renderRecipeStatus();
