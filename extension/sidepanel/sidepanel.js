@@ -1,7 +1,7 @@
 /**
  * auto-mate side panel controller.
  *
- * Orchestrates the three-step UX (Learn -> Data -> Run) plus reporting. Talks
+ * Orchestrates the four-step UX (Data -> Learn -> Run -> Report). Talks
  * to the page's content scripts via chrome.tabs.sendMessage and receives their
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
@@ -32,16 +32,42 @@
     toast._t = setTimeout(() => t.classList.add('hidden'), ms);
   }
 
+  function hasData() {
+    return state.engineRows.length > 0;
+  }
+
+  function switchTab(tabName) {
+    $$('.tab-trigger').forEach((t) => t.classList.toggle('active', t.dataset.tab === tabName));
+    $$('.panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === tabName));
+    if (tabName === 'run') refreshRunReadiness();
+    if (tabName === 'setup') refreshLearnReadiness();
+  }
+
+  function refreshLearnReadiness() {
+    const el = $('#learnReadiness');
+    const btn = $('#btnStartLearn');
+    if (!el || !btn) return;
+    if (btn.classList.contains('hidden')) return; // learn session in progress
+
+    if (!hasData()) {
+      el.innerHTML =
+        '<span class="badge-outline border-amber-500/50 text-amber-400">Upload spreadsheet first</span> ' +
+        'Go to the <strong>Data</strong> tab and load your Slicer Dicer export before recording.';
+      btn.disabled = true;
+    } else {
+      el.innerHTML =
+        `<span class="badge-secondary">Spreadsheet loaded</span> ` +
+        `<strong>${state.engineRows.length}</strong> entries ready — open the form and start Learn.`;
+      btn.disabled = false;
+    }
+  }
+
   // ---- Tabs ----
   $$('.tab-trigger').forEach((tab) => {
-    tab.addEventListener('click', () => {
-      $$('.tab-trigger').forEach((t) => t.classList.remove('active'));
-      $$('.panel').forEach((p) => p.classList.remove('active'));
-      tab.classList.add('active');
-      $(`.panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
-      if (tab.dataset.tab === 'run') refreshRunReadiness();
-    });
+    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
   });
+
+  $('#btnGoLearn').addEventListener('click', () => switchTab('setup'));
 
   // ---- Active tab + content-script injection ----
   async function getActiveTab() {
@@ -106,6 +132,11 @@
 
   // ================= LEARN =================
   $('#btnStartLearn').addEventListener('click', async () => {
+    if (!hasData()) {
+      toast('Upload your spreadsheet on the Data tab first.');
+      switchTab('data');
+      return;
+    }
     state.recordedSteps = [];
     renderSteps();
     try {
@@ -125,6 +156,7 @@
     } catch (_) {}
     $('#btnFinishLearn').classList.add('hidden');
     $('#btnStartLearn').classList.remove('hidden');
+    refreshLearnReadiness();
     if (!state.recordedSteps.length) toast('No steps captured. Try again and interact with the form fields.');
   });
 
@@ -311,8 +343,11 @@
       state.mapping = PARSER.guessMapping(parsed.headers);
       $('#fileInfo').innerHTML = `Loaded <b>${escapeHtml(file.name)}</b> &middot; ${parsed.rows.length} rows, ${parsed.headers.length} columns`;
       $('#mappingBox').classList.remove('hidden');
+      $('#btnGoLearn').classList.remove('hidden');
       renderMapping();
       rebuildEngineRows();
+      refreshLearnReadiness();
+      toast('Spreadsheet loaded. Review mapping, then continue to Learn.');
     } catch (err) {
       $('#fileInfo').textContent = `Could not read file: ${err.message}`;
     }
@@ -371,8 +406,8 @@
   function refreshRunReadiness() {
     const el = $('#runReadiness');
     const issues = [];
-    if (!state.recipe) issues.push('no recipe (do step 1)');
-    if (!state.engineRows.length) issues.push('no data loaded (do step 2)');
+    if (!state.recipe) issues.push('no recipe (do step 2 — Learn)');
+    if (!hasData()) issues.push('no data loaded (do step 1 — Data)');
     if (issues.length) {
       el.innerHTML = `<span class="badge-outline border-amber-500/50 text-amber-400">Not ready</span> ${issues.join(' and ')}.`;
       $('#btnRun').disabled = true;
@@ -519,9 +554,14 @@
 
   // ---- init ----
   (async function init() {
+    const tagline = $('#tagline');
+    if (tagline && typeof window.FAA_randomQuote === 'function') {
+      tagline.textContent = window.FAA_randomQuote();
+    }
     const stored = await chrome.storage.local.get(STORAGE_KEYS.RECIPE);
     state.recipe = stored[STORAGE_KEYS.RECIPE] || null;
     renderRecipeStatus();
+    refreshLearnReadiness();
     refreshRunReadiness();
   })();
 })();

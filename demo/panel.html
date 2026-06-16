@@ -10,28 +10,70 @@
     <header class="border-b px-4 py-4">
       <div class="flex flex-col gap-0.5">
         <h1 class="text-lg font-semibold tracking-tight">auto&#8209;mate</h1>
-        <p class="text-xs text-muted-foreground">Log in yourself &middot; let auto&#8209;mate do the rest</p>
+        <p id="tagline" class="text-xs text-muted-foreground italic"></p>
       </div>
     </header>
 
     <nav class="border-b px-3 py-3">
       <div class="tabs-list" role="tablist">
-        <button type="button" class="tab-trigger active" data-tab="setup" role="tab">1. Learn</button>
-        <button type="button" class="tab-trigger" data-tab="data" role="tab">2. Data</button>
+        <button type="button" class="tab-trigger active" data-tab="data" role="tab">1. Data</button>
+        <button type="button" class="tab-trigger" data-tab="setup" role="tab">2. Learn</button>
         <button type="button" class="tab-trigger" data-tab="run" role="tab">3. Run</button>
         <button type="button" class="tab-trigger" data-tab="report" role="tab">Report</button>
       </div>
     </nav>
 
     <main class="p-4 space-y-4">
-      <section class="panel active space-y-4" data-panel="setup">
+      <section class="panel active space-y-4" data-panel="data">
         <div class="alert-muted">
-          auto&#8209;mate watches you fill the form <strong>one time</strong> and remembers how. Open the MedHub
-          procedure form in the active tab, log in yourself, then start learning.
+          Start here: upload your <strong>Slicer Dicer export</strong>. auto&#8209;mate uses it to auto&#8209;label fields
+          when you record the form in Learn mode.
         </div>
+        <div id="dropzone" class="dropzone">
+          <div class="space-y-1">
+            <p class="text-sm font-medium">Drag your Slicer Dicer export here</p>
+            <p class="text-xs text-muted-foreground">.xlsx, .xls or .csv &mdash; or click to browse</p>
+          </div>
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
+        </div>
+        <div id="fileInfo" class="text-sm min-h-[1.25rem]"></div>
+        <div id="mappingBox" class="card hidden">
+          <div class="card-header">
+            <h3 class="card-title">Column mapping</h3>
+            <p class="card-description">auto-mate guessed these from your headers. Override if needed, then go to Learn.</p>
+          </div>
+          <div class="card-content space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+              <label class="space-y-1.5"><span class="label">Date</span><select class="select" data-map="date"></select></label>
+              <label class="space-y-1.5"><span class="label">Supervisor</span><select class="select" data-map="supervisor"></select></label>
+              <label class="space-y-1.5"><span class="label">Patient MRN</span><select class="select" data-map="mrn"></select></label>
+              <label class="space-y-1.5"><span class="label">Procedure</span><select class="select" data-map="procedure"></select></label>
+            </div>
+            <label class="form-row cursor-pointer">
+              <input type="checkbox" id="groupProcedures" checked class="mt-0.5 rounded border-input" />
+              <span class="text-sm leading-snug">Combine multiple procedure rows that share the same MRN + date</span>
+            </label>
+            <div>
+              <div class="mb-2 flex items-baseline justify-between gap-2">
+                <h4 class="text-sm font-medium">Preview</h4>
+                <span id="rowCount" class="text-xs text-muted-foreground"></span>
+              </div>
+              <div id="preview" class="preview-table-wrap"></div>
+            </div>
+            <button type="button" id="btnGoLearn" class="btn-primary w-full hidden">Continue to Learn &rarr;</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="panel space-y-4" data-panel="setup">
+        <div class="alert-muted">
+          Open the MedHub procedure form in the active tab and log in. Fill the form <strong>once</strong> using values
+          from your spreadsheet &mdash; auto&#8209;mate records how and maps columns automatically.
+        </div>
+        <div id="learnReadiness" class="text-sm min-h-[1.25rem]"></div>
         <div id="recipeStatus" class="text-sm min-h-[1.25rem]"></div>
         <div class="flex flex-wrap gap-2">
-          <button type="button" id="btnStartLearn" class="btn-primary">Start Learn mode</button>
+          <button type="button" id="btnStartLearn" class="btn-primary" disabled>Start Learn mode</button>
           <button type="button" id="btnFinishLearn" class="btn-primary hidden">Finish &amp; review</button>
         </div>
         <div id="learnSteps" class="card hidden">
@@ -52,42 +94,6 @@
           </div>
           <pre id="recipeJson" class="code-block hidden"></pre>
         </details>
-      </section>
-
-      <section class="panel space-y-4" data-panel="data">
-        <div id="dropzone" class="dropzone">
-          <div class="space-y-1">
-            <p class="text-sm font-medium">Drag your Slicer Dicer export here</p>
-            <p class="text-xs text-muted-foreground">.xlsx, .xls or .csv &mdash; or click to browse</p>
-          </div>
-          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
-        </div>
-        <div id="fileInfo" class="text-sm min-h-[1.25rem]"></div>
-        <div id="mappingBox" class="card hidden">
-          <div class="card-header">
-            <h3 class="card-title">Column mapping</h3>
-            <p class="card-description">auto-mate guessed these from your headers. Override if needed.</p>
-          </div>
-          <div class="card-content space-y-4">
-            <div class="grid grid-cols-2 gap-3">
-              <label class="space-y-1.5"><span class="label">Date</span><select class="select" data-map="date"></select></label>
-              <label class="space-y-1.5"><span class="label">Supervisor</span><select class="select" data-map="supervisor"></select></label>
-              <label class="space-y-1.5"><span class="label">Patient MRN</span><select class="select" data-map="mrn"></select></label>
-              <label class="space-y-1.5"><span class="label">Procedure</span><select class="select" data-map="procedure"></select></label>
-            </div>
-            <label class="form-row cursor-pointer">
-              <input type="checkbox" id="groupProcedures" checked class="mt-0.5 rounded border-input" />
-              <span class="text-sm leading-snug">Combine multiple procedure rows that share the same MRN + date</span>
-            </label>
-            <div>
-              <div class="mb-2 flex items-baseline justify-between gap-2">
-                <h4 class="text-sm font-medium">Preview</h4>
-                <span id="rowCount" class="text-xs text-muted-foreground"></span>
-              </div>
-              <div id="preview" class="preview-table-wrap"></div>
-            </div>
-          </div>
-        </div>
       </section>
 
       <section class="panel space-y-4" data-panel="run">
@@ -130,6 +136,7 @@
     <script>window.__FAA_CTX = 'panel';</script>
     <script src="chrome-shim.js"></script>
     <script src="../extension/common/messages.js"></script>
+    <script src="../extension/sidepanel/quotes.js"></script>
     <script src="../extension/vendor/xlsx.full.min.js"></script>
     <script src="../extension/sidepanel/parser.js"></script>
     <script src="../extension/sidepanel/report.js"></script>
