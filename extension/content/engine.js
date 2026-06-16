@@ -78,7 +78,8 @@
     return Math.round((hits / qt.length) * 40);
   }
 
-  async function selectFromAutocomplete(inputEl, optionSelector, query, log) {
+  async function selectFromAutocomplete(inputEl, optionSelector, query, opts = {}) {
+    const timeout = opts.autocompleteTimeoutMs != null ? opts.autocompleteTimeoutMs : 9000;
     await typeInto(inputEl, query);
     const options = await waitFor(
       () => {
@@ -86,7 +87,7 @@
           .filter((o) => DOM.isVisible(o) && (o.textContent || '').trim().length > 0);
         return list.length ? list : null;
       },
-      { timeout: 9000 }
+      { timeout }
     );
     if (!options) {
       throw new Error(`No autocomplete results for "${query}"`);
@@ -104,10 +105,13 @@
       throw new Error(`No good match for "${query}" (best option: "${best ? best.textContent.trim().slice(0, 60) : 'none'}")`);
     }
     const chosenText = best.textContent.trim();
-    best.scrollIntoView({ block: 'center' });
+    try {
+      if (typeof best.scrollIntoView === 'function') best.scrollIntoView({ block: 'center' });
+    } catch (_) {
+      /* not implemented in headless DOM */
+    }
     best.click();
     await sleep(150);
-    if (log) log(chosenText);
     return chosenText;
   }
 
@@ -135,7 +139,8 @@
    */
   async function runRow(recipe, row, opts = {}) {
     resetAbort();
-    const { dryRun = false, onAction = () => {}, fieldDelayMs = 250 } = opts;
+    const { dryRun = false, onAction = () => {}, fieldDelayMs = 250, autocompleteTimeoutMs } = opts;
+    const acOpts = { autocompleteTimeoutMs };
     const actions = [];
 
     const record = (entry) => {
@@ -191,7 +196,7 @@
                 return { ok: false, actions, failedField: step.field };
               }
               try {
-                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, proc);
+                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, proc, acOpts);
                 record({ field: step.field, role: step.role, value: proc, chosen, outcome: 'success' });
               } catch (err) {
                 record({ field: step.field, role: step.role, value: proc, outcome: 'failed', detail: err.message });
@@ -201,7 +206,7 @@
             }
           } else {
             const v = valueForField(step.field, row);
-            const chosen = await selectFromAutocomplete(el, step.optionSelector, v);
+            const chosen = await selectFromAutocomplete(el, step.optionSelector, v, acOpts);
             record({ field: step.field, role: step.role, value: v, chosen, outcome: 'success' });
           }
         } else if (step.role === ROLE.SUBMIT) {

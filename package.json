@@ -1,0 +1,12 @@
+{
+  "name": "auto-mate",
+  "version": "0.1.0",
+  "private": true,
+  "description": "auto-mate Chrome extension: record a web form once, then fill it repeatedly from a spreadsheet.",
+  "scripts": {
+    "test": "node extension/test/run-all.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.1.0"
+  }
+}

@@ -1,0 +1,142 @@
+<!--
+  SYNTHETIC MedHub "Add Procedure" form fixture.
+
+  IMPORTANT: This is a best-effort reconstruction of a MedHub procedure-logging
+  form, NOT a capture of the client's live form (their saved HTML was the home
+  page, which contained no form inputs). It mirrors MedHub's classic jQuery
+  autocomplete pattern (type into a field -> a <ul class="ac_results"> of
+  <li class="ac_item"> appears -> click an item). It exists so the recorder and
+  replay engine can be tested end-to-end. Once the real Procedures form is
+  captured via Learn mode, add it as another fixture and reuse these tests.
+
+  The inline script simulates the autocomplete endpoints for supervisor and
+  procedure so jsdom can exercise the type-then-pick flow.
+-->
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>MedHub - Add Procedure</title>
+  </head>
+  <body>
+    <h1>Log Procedure</h1>
+    <form id="procForm">
+      <div class="field">
+        <label for="proc_date">Procedure Date</label>
+        <input type="text" id="proc_date" name="date" placeholder="MM/DD/YYYY" />
+      </div>
+
+      <div class="field">
+        <label for="proc_location">Location</label>
+        <input type="text" id="proc_location" name="location" />
+      </div>
+
+      <div class="field">
+        <label for="sup_search">Supervisor</label>
+        <input type="text" id="sup_search" name="supervisor_search" autocomplete="off" aria-label="Supervisor" />
+        <ul class="ac_results" id="sup_results" style="display:none"></ul>
+        <input type="hidden" id="sup_id" name="supervisor_id" />
+      </div>
+
+      <div class="field">
+        <label for="patient_mrn">Patient MRN</label>
+        <input type="text" id="patient_mrn" name="patient" />
+      </div>
+
+      <div class="field">
+        <label for="proc_search">Procedure</label>
+        <input type="text" id="proc_search" name="procedure_search" autocomplete="off" aria-label="Procedure" />
+        <ul class="ac_results" id="proc_results" style="display:none"></ul>
+        <ul id="selected_procedures"></ul>
+      </div>
+
+      <button type="button" id="submitBtn">Save Procedure</button>
+    </form>
+
+    <script>
+      (function () {
+        var SUPERVISORS = [
+          { id: 11, name: 'Smith, John MD' },
+          { id: 22, name: 'Smithson, Karen MD' },
+          { id: 33, name: 'Lee, Karen MD' },
+          { id: 44, name: 'Diaz Sierra, Alejandra MD' }
+        ];
+        var PROCEDURES = [
+          'Colonoscopy',
+          'Polypectomy',
+          'Upper Endoscopy',
+          'Biopsy',
+          'Cardiac Catheterization'
+        ];
+
+        function renderResults(ul, items, makeText) {
+          ul.innerHTML = '';
+          if (!items.length) {
+            ul.style.display = 'none';
+            return;
+          }
+          items.forEach(function (it) {
+            var li = document.createElement('li');
+            li.className = 'ac_item';
+            li.textContent = makeText(it);
+            li.dataset.value = makeText(it);
+            ul.appendChild(li);
+          });
+          ul.style.display = 'block';
+        }
+
+        var supInput = document.getElementById('sup_search');
+        var supResults = document.getElementById('sup_results');
+        supInput.addEventListener('input', function () {
+          var q = supInput.value.trim().toLowerCase();
+          if (!q) {
+            supResults.style.display = 'none';
+            return;
+          }
+          var matches = SUPERVISORS.filter(function (s) {
+            return s.name.toLowerCase().indexOf(q) !== -1;
+          });
+          renderResults(supResults, matches, function (s) { return s.name; });
+        });
+        supResults.addEventListener('click', function (e) {
+          var li = e.target.closest('li.ac_item');
+          if (!li) return;
+          supInput.value = li.dataset.value;
+          document.getElementById('sup_id').value = li.dataset.value;
+          supResults.style.display = 'none';
+        });
+
+        var procInput = document.getElementById('proc_search');
+        var procResults = document.getElementById('proc_results');
+        procInput.addEventListener('input', function () {
+          var q = procInput.value.trim().toLowerCase();
+          if (!q) {
+            procResults.style.display = 'none';
+            return;
+          }
+          var matches = PROCEDURES.filter(function (p) {
+            return p.toLowerCase().indexOf(q) !== -1;
+          });
+          renderResults(procResults, matches, function (p) { return p; });
+        });
+        procResults.addEventListener('click', function (e) {
+          var li = e.target.closest('li.ac_item');
+          if (!li) return;
+          var sel = document.getElementById('selected_procedures');
+          var chip = document.createElement('li');
+          chip.className = 'proc_chip';
+          chip.textContent = li.dataset.value;
+          sel.appendChild(chip);
+          procInput.value = '';
+          procResults.style.display = 'none';
+        });
+
+        document.getElementById('submitBtn').addEventListener('click', function () {
+          document.body.setAttribute('data-submitted', 'true');
+          var n = parseInt(document.body.getAttribute('data-submit-count') || '0', 10);
+          document.body.setAttribute('data-submit-count', String(n + 1));
+        });
+      })();
+    </script>
+  </body>
+</html>

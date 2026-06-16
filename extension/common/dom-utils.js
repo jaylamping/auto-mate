@@ -147,10 +147,28 @@
 
   function isVisible(el) {
     if (!el) return false;
-    const rect = el.getBoundingClientRect();
-    if (rect.width === 0 && rect.height === 0) return false;
-    const style = root.getComputedStyle(el);
-    return style.visibility !== 'hidden' && style.display !== 'none';
+    if (el.hidden) return false;
+    let style = null;
+    try {
+      style = root.getComputedStyle(el);
+    } catch (_) {
+      style = null;
+    }
+    if (style && (style.visibility === 'hidden' || style.display === 'none')) return false;
+    // Walk ancestors for display:none (covers collapsed dropdown containers).
+    let p = el.parentElement;
+    while (p) {
+      let ps = null;
+      try {
+        ps = root.getComputedStyle(p);
+      } catch (_) {}
+      if (ps && (ps.display === 'none' || ps.visibility === 'hidden')) return false;
+      p = p.parentElement;
+    }
+    // Note: we intentionally do not require a non-zero bounding rect. Headless
+    // DOMs (jsdom) report zero rects for everything, and real dropdowns are
+    // toggled via display/visibility, which we already check above.
+    return true;
   }
 
   root.FAA_DOM = {

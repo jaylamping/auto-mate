@@ -106,6 +106,12 @@
     if (!active) return;
     const el = e.target;
     if (!isTextEntry(el)) return;
+    // If typing has moved to a different field without an intervening click
+    // (e.g. tabbing between inputs), flush the previous field as a plain input
+    // so it is not lost. Same-element keystrokes just update the pending value.
+    if (pendingType && pendingType.el !== el && !pendingType.emitted) {
+      flushPendingTypeAsInput();
+    }
     const value = el.isContentEditable ? el.textContent : el.value;
     pendingType = {
       el,
