@@ -7,7 +7,8 @@
     "test": "node extension/test/run-all.js",
     "build:css": "tailwindcss -i ./extension/sidepanel/input.css -o ./extension/sidepanel/sidepanel.css --minify",
     "dev:css": "tailwindcss -i ./extension/sidepanel/input.css -o ./extension/sidepanel/sidepanel.css --watch",
-    "assets:manifest": "node scripts/generate-kanye-manifest.js"
+    "assets:manifest": "node scripts/generate-kanye-manifest.js",
+    "generate:icons": "python scripts/generate-icons.py"
   },
   "devDependencies": {
     "autoprefixer": "^10.4.20",
