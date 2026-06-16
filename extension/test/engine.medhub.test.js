@@ -155,4 +155,52 @@ module.exports = async function run() {
     assert.strictEqual(selected[0].children[1].textContent, 'Ablation');
     console.log('  engine.medhub: clears selected procedures before each row.');
   }
+
+  // ---- Log Another Procedure when more rows remain ----
+  {
+    const page = createPage('medhub-procedure-log.html');
+    const { document, ENGINE } = page;
+    const recipe = buildRecipe(page.MSG);
+    const logAnother = document.getElementById('logAnother');
+    logAnother.checked = false;
+    const result = await ENGINE.runRow(recipe, row, {
+      dryRun: false,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0,
+      index: 0,
+      total: 3
+    });
+    assert.ok(result.ok, 'live row with more rows pending should succeed');
+    assert.strictEqual(logAnother.checked, true, 'Log Another Procedure should be checked');
+    assert.ok(
+      result.actions.some((a) => a.detail && a.detail.includes('Log Another Procedure')),
+      'should log Log Another action'
+    );
+    assert.strictEqual(document.body.getAttribute('data-submit-count'), '1', 'submitted once');
+    console.log('  engine.medhub: checks Log Another Procedure when more rows remain.');
+  }
+
+  // ---- Final row should not force Log Another ----
+  {
+    const page = createPage('medhub-procedure-log.html');
+    const { document, ENGINE } = page;
+    const recipe = buildRecipe(page.MSG);
+    const logAnother = document.getElementById('logAnother');
+    logAnother.checked = false;
+    const result = await ENGINE.runRow(recipe, row, {
+      dryRun: false,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0,
+      index: 2,
+      total: 3
+    });
+    assert.ok(result.ok);
+    assert.strictEqual(logAnother.checked, false, 'final row should not force Log Another');
+    assert.ok(
+      !result.actions.some((a) => a.detail && a.detail.includes('Log Another Procedure')),
+      'should not log Log Another on final row'
+    );
+    assert.strictEqual(document.body.getAttribute('data-submit-count'), '1', 'submitted on final row');
+    console.log('  engine.medhub: skips Log Another on final row.');
+  }
 };

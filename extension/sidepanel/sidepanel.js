@@ -6,7 +6,7 @@
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
 (function () {
-  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey } = window.FAA_MSG;
+  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey } = window.FAA_MSG;
   const PARSER = window.FAA_PARSER;
   const REPORT = window.FAA_REPORT;
 
@@ -29,8 +29,12 @@
     learnRecording: false,
     fieldRevealOrder: [],
     reportFilter: 'all',
-    awaitingLiveConfirm: false
+    awaitingLiveConfirm: false,
+    dataFileName: '',
+    runTabId: null
   };
+
+  let persistDataSessionTimer = null;
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
@@ -41,6 +45,109 @@
     t.classList.remove('hidden');
     clearTimeout(toast._t);
     toast._t = setTimeout(() => t.classList.add('hidden'), ms);
+  }
+
+  function headersEqual(a, b) {
+    if (!a || !b || a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
+  }
+
+  function sanitizeMapping(mapping, headers) {
+    const allowed = new Set(headers || []);
+    const out = {};
+    for (const [key, col] of Object.entries(mapping || {})) {
+      if (col && allowed.has(col)) out[key] = col;
+    }
+    return out;
+  }
+
+  async function persistDataSession() {
+    if (!state.parsed) {
+      try {
+        await chrome.storage.local.remove(STORAGE_KEYS.DATA_SESSION);
+      } catch (_) {}
+      return;
+    }
+    try {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.DATA_SESSION]: {
+          fileName: state.dataFileName || 'spreadsheet',
+          headers: state.parsed.headers,
+          rows: state.parsed.rows,
+          sheetName: state.parsed.sheetName || '',
+          mapping: state.mapping,
+          savedAt: new Date().toISOString()
+        }
+      });
+    } catch (err) {
+      toast('Could not save spreadsheet session locally — storage may be full.');
+    }
+  }
+
+  function schedulePersistDataSession() {
+    clearTimeout(persistDataSessionTimer);
+    persistDataSessionTimer = setTimeout(() => persistDataSession(), 300);
+  }
+
+  async function persistSettings() {
+    const fieldDelayMs = parseInt($('#fieldDelay').value, 10);
+    try {
+      await chrome.storage.local.set({
+        [STORAGE_KEYS.SETTINGS]: { fieldDelayMs: Number.isFinite(fieldDelayMs) ? fieldDelayMs : 200 }
+      });
+    } catch (_) {}
+  }
+
+  function restoreDataSession(session) {
+    if (!session?.headers?.length || !Array.isArray(session.rows)) return;
+    state.parsed = {
+      headers: session.headers,
+      rows: session.rows,
+      sheetName: session.sheetName || ''
+    };
+    state.mapping = sanitizeMapping(session.mapping, session.headers);
+    state.dataFileName = session.fileName || 'Saved spreadsheet';
+    showDataLoadedUI(state.dataFileName, session.rows.length, session.headers.length);
+    rebuildEngineRows();
+    state.maxTabIndex = Math.max(state.maxTabIndex, TAB_ORDER.indexOf('mapping'));
+    if (state.recipe) state.maxTabIndex = Math.max(state.maxTabIndex, TAB_ORDER.indexOf('run'));
+    refreshDataStepNav();
+    refreshLearnReadiness();
+    refreshLearnMappingVisibility();
+    refreshTabLocks();
+  }
+
+  async function validateRunTab() {
+    const tab = await getActiveTab();
+    if (!tab?.id) {
+      toast('No active tab — click the MedHub Procedures form tab first.');
+      return null;
+    }
+    if (!state.recipe?.url || !tabMatchesRecipeUrl(tab.url, state.recipe.url)) {
+      toast('Wrong page — open the Procedures form you used during Mapping.');
+      return null;
+    }
+    return tab;
+  }
+
+  async function assertRunTabStable(rowIndex) {
+    const tab = await getActiveTab();
+    if (!tab?.id || tab.id !== state.runTabId) {
+      return {
+        ok: false,
+        message: `Row ${rowIndex + 1}: tab changed — keep the Procedures form tab active during a run.`
+      };
+    }
+    if (!tabMatchesRecipeUrl(tab.url, state.recipe.url)) {
+      return {
+        ok: false,
+        message: `Row ${rowIndex + 1}: left the Procedures form — go back to that tab or stop.`
+      };
+    }
+    return { ok: true };
   }
 
   function hasData() {
@@ -274,6 +381,7 @@
     inferMappingFromLearn();
     renderFormMapping();
     rebuildEngineRows();
+    schedulePersistDataSession();
     await stopLearnRecording();
     await saveRecipeFromSteps();
     if (!state.recipe) return;
@@ -484,6 +592,7 @@
     if (changed) {
       if (flash) flashColField(mapKey);
       rebuildEngineRows();
+      schedulePersistDataSession();
     }
     refreshLearnStepNav();
   }
@@ -519,6 +628,7 @@
         delete state.mapping[field];
         rebuildEngineRows();
         refreshLearnStepNav();
+        schedulePersistDataSession();
         return;
       }
       setColumnMapping(field, v, true);
@@ -749,6 +859,7 @@
     state.engineRows = [];
     state.recordedSteps = [];
     state.fieldRevealOrder = [];
+    state.dataFileName = '';
     state.maxTabIndex = 0;
     fileInput.value = '';
     showDataUploadUI();
@@ -757,6 +868,7 @@
     refreshLearnReadiness();
     refreshRunReadiness();
     switchTab('data');
+    persistDataSession();
   }
 
   $('#btnClearFile').addEventListener('click', clearLoadedFile);
@@ -770,11 +882,20 @@
     try {
       const parsed = await PARSER.readFile(file);
       state.parsed = parsed;
-      state.mapping = {};
-    state.formBindings = {};
-    state.recordedSteps = [];
-    state.fieldRevealOrder = [];
+      state.dataFileName = file.name;
+      const stored = await chrome.storage.local.get(STORAGE_KEYS.DATA_SESSION);
+      const prev = stored[STORAGE_KEYS.DATA_SESSION];
+      if (prev && headersEqual(prev.headers, parsed.headers)) {
+        state.mapping = sanitizeMapping(prev.mapping, parsed.headers);
+      } else {
+        state.mapping = {};
+      }
+      state.formBindings = {};
+      state.recordedSteps = [];
+      state.fieldRevealOrder = [];
       showDataLoadedUI(file.name, parsed.rows.length, parsed.headers.length);
+      rebuildEngineRows();
+      await persistDataSession();
       refreshDataStepNav();
       refreshLearnReadiness();
       refreshLearnMappingVisibility();
@@ -808,7 +929,14 @@
 
   $('#fieldDelay').addEventListener('input', (e) => {
     $('#delayVal').textContent = e.target.value;
+    schedulePersistSettings();
   });
+
+  let persistSettingsTimer = null;
+  function schedulePersistSettings() {
+    clearTimeout(persistSettingsTimer);
+    persistSettingsTimer = setTimeout(() => persistSettings(), 300);
+  }
 
   $('#btnRun').addEventListener('click', runSession);
   $('#btnStop').addEventListener('click', async () => {
@@ -894,6 +1022,10 @@
       if (!ok) return;
     }
 
+    const runTab = await validateRunTab();
+    if (!runTab) return;
+    state.runTabId = runTab.id;
+
     try {
       await sendToTab(MSG.CLEAR_OVERLAY);
     } catch (_) {}
@@ -910,6 +1042,13 @@
     for (let i = 0; i < state.engineRows.length; i++) {
       if (!state.running) {
         logLine('Session stopped by user.', 'aborted');
+        break;
+      }
+      const tabCheck = await assertRunTabStable(i);
+      if (!tabCheck.ok) {
+        toast(tabCheck.message);
+        logLine(tabCheck.message, 'failed');
+        state.running = false;
         break;
       }
       const row = state.engineRows[i];
@@ -939,6 +1078,7 @@
 
     state.session.finishedAt = new Date().toISOString();
     state.running = false;
+    state.runTabId = null;
     $('#btnRun').classList.remove('hidden');
     $('#btnStop').classList.add('hidden');
     renderReport();
@@ -948,16 +1088,29 @@
   }
 
   function runOneRow(row, index, total, dryRun, fieldDelayMs) {
-    return new Promise(async (resolve) => {
-      state.rowResolver = (payload) => {
+    return new Promise((resolve) => {
+      let settled = false;
+      const finish = (payload) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
         state.rowResolver = null;
         resolve(payload);
       };
-      try {
-        await sendToTab(MSG.RUN_ROW, { recipe: state.recipe, row, index, total, dryRun, fieldDelayMs });
-      } catch (err) {
-        resolve({ index, result: { ok: false, actions: [], failedField: 'page' } });
-      }
+
+      state.rowResolver = (payload) => finish(payload);
+
+      const timer = setTimeout(async () => {
+        logLine(`Row ${index + 1} timed out after ${ROW_TIMEOUT_MS / 1000}s.`, 'failed');
+        try {
+          await sendToTab(MSG.STOP_RUN);
+        } catch (_) {}
+        finish({ index, result: { ok: false, actions: [], failedField: 'timeout' } });
+      }, ROW_TIMEOUT_MS);
+
+      sendToTab(MSG.RUN_ROW, { recipe: state.recipe, row, index, total, dryRun, fieldDelayMs }).catch(() => {
+        finish({ index, result: { ok: false, actions: [], failedField: 'page' } });
+      });
     });
   }
 
@@ -1139,9 +1292,21 @@
     });
     refreshDataStepNav();
     refreshLearnMappingVisibility();
-    const stored = await chrome.storage.local.get(STORAGE_KEYS.RECIPE);
+    const stored = await chrome.storage.local.get([
+      STORAGE_KEYS.RECIPE,
+      STORAGE_KEYS.DATA_SESSION,
+      STORAGE_KEYS.SETTINGS
+    ]);
+    const settings = stored[STORAGE_KEYS.SETTINGS];
+    if (settings && settings.fieldDelayMs != null) {
+      $('#fieldDelay').value = String(settings.fieldDelayMs);
+      $('#delayVal').textContent = String(settings.fieldDelayMs);
+    }
     state.recipe = stored[STORAGE_KEYS.RECIPE] || null;
-    if (state.recipe) state.maxTabIndex = TAB_ORDER.indexOf('run');
+    if (stored[STORAGE_KEYS.DATA_SESSION]) {
+      restoreDataSession(stored[STORAGE_KEYS.DATA_SESSION]);
+    }
+    if (state.recipe) state.maxTabIndex = Math.max(state.maxTabIndex, TAB_ORDER.indexOf('run'));
     refreshTabLocks();
     renderRecipeStatus();
     refreshLearnReadiness();

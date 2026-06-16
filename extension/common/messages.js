@@ -31,7 +31,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '10';
+  const BUILD_ID = '12';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -75,8 +75,36 @@
   const STORAGE_KEYS = {
     RECIPE: 'faa.recipe',
     MAPPING: 'faa.mapping',
+    DATA_SESSION: 'faa.dataSession',
     SETTINGS: 'faa.settings'
   };
+
+  /** Per-row engine timeout (side panel waits for ROW_DONE). */
+  const ROW_TIMEOUT_MS = 120000;
+
+  function normalizeRecipeUrl(url) {
+    try {
+      const u = new URL(String(url));
+      return `${u.origin}${u.pathname.replace(/\/+$/, '')}`;
+    } catch (_) {
+      return '';
+    }
+  }
+
+  /** True when tab URL is the same form origin/path learned in the recipe. */
+  function tabMatchesRecipeUrl(tabUrl, recipeUrl) {
+    const tabNorm = normalizeRecipeUrl(tabUrl);
+    const recipeNorm = normalizeRecipeUrl(recipeUrl);
+    if (!tabNorm || !recipeNorm) return false;
+    if (tabNorm === recipeNorm) return true;
+    if (tabNorm.endsWith(recipeNorm) || recipeNorm.endsWith(tabNorm)) return true;
+    try {
+      const t = new URL(tabUrl);
+      return /procedures/i.test(t.pathname);
+    } catch (_) {
+      return false;
+    }
+  }
 
   function minMappingLenForFieldKey(fieldKey) {
     const def = FORM_FIELDS.find((f) => f.key === fieldKey);
@@ -204,6 +232,9 @@
     FORM_FIELDS,
     STORAGE_KEYS,
     BUILD_ID,
+    ROW_TIMEOUT_MS,
+    normalizeRecipeUrl,
+    tabMatchesRecipeUrl,
     minMappingLenForFieldKey,
     minMappingLenFromHaystack,
     minColumnInferLenForFieldKey,

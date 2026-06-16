@@ -475,15 +475,55 @@
     return cleared;
   }
 
+  function findLogAnotherCheckbox() {
+    const byId = document.getElementById('logAnother');
+    if (byId && String(byId.type).toLowerCase() === 'checkbox') return byId;
+    for (const cb of document.querySelectorAll('input[type="checkbox"]')) {
+      const label =
+        cb.closest('label') ||
+        (cb.id ? document.querySelector(`label[for="${CSS.escape(cb.id)}"]`) : null);
+      const hay = `${label ? label.textContent : ''} ${cb.getAttribute('aria-label') || ''}`.toLowerCase();
+      if (/log\s*another\s*procedure/.test(hay)) return cb;
+    }
+    return null;
+  }
+
+  async function ensureLogAnotherProcedure(fieldDelayMs = 100) {
+    const cb = findLogAnotherCheckbox();
+    if (!cb) return { found: false, checked: false };
+    if (cb.checked) return { found: true, checked: true, already: true };
+    cb.click();
+    if (!cb.checked) {
+      cb.checked = true;
+      cb.dispatchEvent(new Event('change', { bubbles: true }));
+      cb.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    await sleep(Math.min(fieldDelayMs, 150));
+    return { found: true, checked: cb.checked, already: false };
+  }
+
+  function hasMoreRowsAfter(index, total) {
+    if (index == null || total == null) return false;
+    return index < total - 1;
+  }
+
   /**
    * @param {object} recipe
    * @param {object} row normalized { date, supervisor, mrn, procedures:[], location? }
-   * @param {object} opts { dryRun, onAction, fieldDelayMs }
+   * @param {object} opts { dryRun, onAction, fieldDelayMs, index, total }
    * @returns {Promise<{ok:boolean, actions:Array}>}
    */
   async function runRow(recipe, row, opts = {}) {
     resetAbort();
-    const { dryRun = false, onAction = () => {}, fieldDelayMs = 200, autocompleteTimeoutMs, typeCharDelayMs } = opts;
+    const {
+      dryRun = false,
+      onAction = () => {},
+      fieldDelayMs = 200,
+      autocompleteTimeoutMs,
+      typeCharDelayMs,
+      index,
+      total
+    } = opts;
     const acOpts = {
       autocompleteTimeoutMs,
       typeCharDelayMs: typeCharDelayMs != null ? typeCharDelayMs : DEFAULT_TYPE_CHAR_MS
@@ -639,6 +679,34 @@
             if (!submitEl) {
               record({ field: step.field, role: step.role, outcome: 'failed', detail: 'Submit control not found' });
               return { ok: false, actions, failedField: step.field };
+            }
+            if (hasMoreRowsAfter(index, total)) {
+              const logAnother = await ensureLogAnotherProcedure(fieldDelayMs);
+              if (!logAnother.found) {
+                record({
+                  field: FIELD.CLICK,
+                  role: ROLE.CLICK,
+                  outcome: 'skipped',
+                  detail: 'Log Another Procedure checkbox not found'
+                });
+              } else if (!logAnother.checked) {
+                record({
+                  field: FIELD.CLICK,
+                  role: ROLE.CLICK,
+                  outcome: 'failed',
+                  detail: 'Could not check Log Another Procedure'
+                });
+                return { ok: false, actions, failedField: step.field };
+              } else {
+                record({
+                  field: FIELD.CLICK,
+                  role: ROLE.CLICK,
+                  outcome: 'success',
+                  detail: logAnother.already
+                    ? 'Log Another Procedure already checked'
+                    : 'Checked Log Another Procedure for next row'
+                });
+              }
             }
             submitEl.click();
             record({ field: step.field, role: step.role, outcome: 'success', detail: 'Submitted' });

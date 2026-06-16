@@ -202,6 +202,18 @@
           document.body.setAttribute('data-submitted', 'true');
           var n = parseInt(document.body.getAttribute('data-submit-count') || '0', 10);
           document.body.setAttribute('data-submit-count', String(n + 1));
+          var logAnother = document.getElementById('logAnother');
+          if (!logAnother || !logAnother.checked) return;
+          document.getElementById('encounterText').value = '';
+          document.getElementById('procedureDate').value = '';
+          document.querySelectorAll('#selectedProcs .selected_proc').forEach(function (tr) { tr.remove(); });
+          var tbody = document.querySelector('#selectedProcs tbody');
+          if (tbody && !tbody.querySelector('.selected_proc')) {
+            var placeholder = document.createElement('tr');
+            placeholder.id = 'noProcRow';
+            placeholder.innerHTML = '<td>(no procedures -- at least one is required)</td>';
+            tbody.appendChild(placeholder);
+          }
         });
       })();
     </script>

@@ -113,6 +113,8 @@
         ENGINE.runRow(recipe, row, {
           dryRun,
           fieldDelayMs,
+          index,
+          total,
           onAction: (entry) => toPanel(MSG.ACTION_LOG, { index, entry })
         })
           .then((result) => {

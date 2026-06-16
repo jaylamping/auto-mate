@@ -57,6 +57,21 @@ assert.strictEqual(headerAllowedForFieldKey('Procedure Notes', FIELD.SUPERVISOR)
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.SUPERVISOR), true);
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.NOTES), false);
 
+const { tabMatchesRecipeUrl } = root.FAA_MSG;
+assert.strictEqual(
+  tabMatchesRecipeUrl(
+    'https://ahc.medhub.com/u/r/procedures_log.mh?x=1',
+    'https://ahc.medhub.com/u/r/procedures_log.mh'
+  ),
+  true,
+  'same procedures path with query should match'
+);
+assert.strictEqual(
+  tabMatchesRecipeUrl('https://ahc.medhub.com/u/r/home.mh', 'https://ahc.medhub.com/u/r/procedures_log.mh'),
+  false,
+  'different medhub path should not match'
+);
+
 // --- Build an in-memory workbook from the sample CSV ---
 const csv = fs.readFileSync(path.join(__dirname, '../samples/slicer-dicer-sample.csv'), 'utf8');
 const wb = root.XLSX.read(csv, { type: 'string' });
