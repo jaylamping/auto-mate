@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>auto-mate demo &mdash; mock MedHub form + live panel</title>
+    <link rel="stylesheet" href="demo.css" />
+  </head>
+  <body>
+    <div class="demo-bar">
+      <strong>auto-mate demo</strong>
+      <span>Left: a mock MedHub "Add Standard Procedure" form. Right: the real auto-mate side panel. No install, no login &mdash; for UX review only.</span>
+    </div>
+
+    <div class="demo-split">
+      <main class="form-pane">
+        <div class="medhub-chrome">ahc.medhub.com/u/r/procedures_log.mh</div>
+        <form id="procLogForm">
+          <h2>Background Information</h2>
+          <div class="field">
+            <label for="procedureDate">Procedure Date *</label>
+            <input type="text" id="procedureDate" name="procedure_date" />
+          </div>
+          <div class="field">
+            <label for="locationSelect">Location *</label>
+            <select id="locationSelect" name="location_id">
+              <option value="">(select)</option>
+              <option value="other" selected>(OTHER - Specify...)</option>
+            </select>
+            <input type="text" id="locationSpecify" name="location_other" aria-label="Location specify" />
+          </div>
+          <div class="field">
+            <span class="field-label">Supervisor</span>
+            <div class="sup-tabs">
+              <a href="#" id="supTabList" class="tab active">List</a>
+              <a href="#" id="supTabSearch" class="tab">Search</a>
+              <a href="#" id="supTabOther" class="tab">Other</a>
+            </div>
+            <div id="supListPane"><select id="supSelect"><option value="">(none)</option></select></div>
+            <div id="supSearchPane" style="display:none">
+              <input type="text" id="supSearch" aria-label="Supervisor search" autocomplete="off" />
+              <ul class="ac_results" id="supResults" style="display:none"></ul>
+            </div>
+            <input type="hidden" id="supChosen" name="supervisor_id" />
+          </div>
+
+          <h2>Patient Information</h2>
+          <div class="field">
+            <label for="encounterSelect">Encounter</label>
+            <select id="encounterSelect" name="encounter_type"><option value="new" selected>(new patient)</option></select>
+            <input type="text" id="encounterText" name="patient" aria-label="Encounter" />
+            <span class="note">do not use patient name</span>
+          </div>
+
+          <h2>Procedures</h2>
+          <table id="selectedProcs"><tbody><tr id="noProcRow"><td>(no procedures -- at least one is required)</td></tr></tbody></table>
+          <div class="add-standard">
+            <h3>Add Standard Procedure</h3>
+            <input type="text" id="procSearch" placeholder="Search" aria-label="Procedure search" autocomplete="off" />
+            <ul id="procList">
+              <li class="proc_row" data-name="Ablation"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Ablation</span></li>
+              <li class="proc_row" data-name="Cardiac catheterization"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Cardiac catheterization</span></li>
+              <li class="proc_row" data-name="Cardioversion"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Cardioversion</span></li>
+              <li class="proc_row" data-name="Colonoscopy"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Colonoscopy</span></li>
+              <li class="proc_row" data-name="Polypectomy"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Polypectomy</span></li>
+              <li class="proc_row" data-name="Upper Endoscopy"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Upper Endoscopy</span></li>
+              <li class="proc_row" data-name="Biopsy"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Biopsy</span></li>
+            </ul>
+          </div>
+
+          <div class="field"><label for="diagnosis">Diagnosis</label><input type="text" id="diagnosis" /></div>
+          <div class="field"><label for="complications">Complications</label><input type="text" id="complications" /></div>
+          <div class="field"><label for="procNotes">Procedure Notes</label><textarea id="procNotes"></textarea></div>
+
+          <button type="button" id="logProcedure">Log Procedure</button>
+          <label class="inline"><input type="checkbox" id="logAnother" /> Log Another Procedure</label>
+          <div id="savedNote" class="saved-note hidden">Logged! (mock)</div>
+        </form>
+      </main>
+
+      <aside class="panel-pane">
+        <iframe id="panelFrame" src="panel.html" title="auto-mate panel"></iframe>
+      </aside>
+    </div>
+
+    <script>
+      (function () {
+        var SUPERVISORS = ['Smith, John MD', 'Smithson, Karen MD', 'Lee, Karen MD', 'Diaz Sierra, Alejandra MD'];
+        var listPane = document.getElementById('supListPane');
+        var searchPane = document.getElementById('supSearchPane');
+        document.getElementById('supTabSearch').addEventListener('click', function (e) { e.preventDefault(); listPane.style.display = 'none'; searchPane.style.display = 'block'; });
+        document.getElementById('supTabList').addEventListener('click', function (e) { e.preventDefault(); searchPane.style.display = 'none'; listPane.style.display = 'block'; });
+        var supSearch = document.getElementById('supSearch');
+        var supResults = document.getElementById('supResults');
+        supSearch.addEventListener('input', function () {
+          var q = supSearch.value.trim().toLowerCase();
+          supResults.innerHTML = '';
+          if (!q) return (supResults.style.display = 'none');
+          var m = SUPERVISORS.filter(function (n) { return n.toLowerCase().indexOf(q) !== -1; });
+          if (!m.length) return (supResults.style.display = 'none');
+          m.forEach(function (n) { var li = document.createElement('li'); li.className = 'sup_result'; li.dataset.value = n; li.textContent = n; supResults.appendChild(li); });
+          supResults.style.display = 'block';
+        });
+        supResults.addEventListener('click', function (e) { var li = e.target.closest('li.sup_result'); if (!li) return; supSearch.value = li.dataset.value; document.getElementById('supChosen').value = li.dataset.value; supResults.style.display = 'none'; });
+        var procSearch = document.getElementById('procSearch');
+        var rows = Array.prototype.slice.call(document.querySelectorAll('#procList .proc_row'));
+        procSearch.addEventListener('input', function () { var q = procSearch.value.trim().toLowerCase(); rows.forEach(function (r) { var n = (r.getAttribute('data-name') || '').toLowerCase(); r.style.display = !q || n.indexOf(q) !== -1 ? '' : 'none'; }); });
+        document.getElementById('procList').addEventListener('click', function (e) {
+          var add = e.target.closest('a.add'); if (!add) return; e.preventDefault();
+          var row = add.closest('.proc_row');
+          var noRow = document.getElementById('noProcRow'); if (noRow) noRow.remove();
+          var tr = document.createElement('tr'); tr.className = 'selected_proc';
+          tr.innerHTML = '<td>--</td><td>' + row.getAttribute('data-name') + '</td><td>Performed</td>';
+          document.querySelector('#selectedProcs tbody').appendChild(tr);
+          procSearch.value = ''; rows.forEach(function (r) { r.style.display = ''; });
+        });
+        document.getElementById('logProcedure').addEventListener('click', function () { var n = document.getElementById('savedNote'); n.classList.remove('hidden'); setTimeout(function () { n.classList.add('hidden'); }, 1200); });
+      })();
+    </script>
+
+    <script>
+      window.__FAA_CTX = 'content';
+    </script>
+    <script src="chrome-shim.js"></script>
+    <script src="../extension/common/messages.js"></script>
+    <script src="../extension/common/dom-utils.js"></script>
+    <script src="../extension/content/recorder.js"></script>
+    <script src="../extension/content/engine.js"></script>
+    <script src="../extension/content/overlay.js"></script>
+    <script src="../extension/content/content.js"></script>
+  </body>
+</html>

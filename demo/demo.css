@@ -1,0 +1,62 @@
+* { box-sizing: border-box; }
+body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #0b1220; color: #e2e8f0; }
+
+.demo-bar {
+  background: #111827; border-bottom: 1px solid #334155;
+  padding: 8px 14px; display: flex; gap: 12px; align-items: baseline;
+}
+.demo-bar strong { color: #7dd3fc; }
+.demo-bar span { color: #94a3b8; font-size: 12px; }
+
+.demo-split { display: flex; height: calc(100vh - 40px); }
+.form-pane { flex: 1; overflow: auto; background: #f1f5f9; color: #0f172a; padding: 0 0 40px; }
+.panel-pane { width: 380px; min-width: 340px; border-left: 1px solid #334155; }
+.panel-pane iframe { width: 100%; height: 100%; border: 0; background: #0f172a; }
+
+.medhub-chrome {
+  background: #634aa5; color: #fff; font: 12px/1 ui-monospace, monospace;
+  padding: 8px 14px;
+}
+.form-pane h1 { font-size: 20px; margin: 18px 20px 8px; }
+#procForm { max-width: 560px; margin: 0 20px; }
+.field { margin: 14px 0; position: relative; }
+.field label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
+.field input[type="text"] {
+  width: 100%; padding: 9px 10px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px;
+}
+.ac_results {
+  list-style: none; margin: 2px 0 0; padding: 4px; position: absolute; z-index: 5;
+  background: #fff; border: 1px solid #cbd5e1; border-radius: 6px; width: 100%;
+  box-shadow: 0 6px 18px rgba(0,0,0,.15);
+}
+.ac_item { padding: 7px 9px; cursor: pointer; border-radius: 4px; }
+.ac_item:hover { background: #e0f2fe; }
+#selected_procedures { list-style: none; padding: 0; margin: 8px 0 0; display: flex; flex-wrap: wrap; gap: 6px; }
+.proc_chip { background: #0ea5e9; color: #04293a; padding: 4px 10px; border-radius: 999px; font-size: 13px; }
+#submitBtn {
+  margin-top: 16px; background: #634aa5; color: #fff; border: none;
+  padding: 10px 18px; border-radius: 6px; font-size: 14px; cursor: pointer;
+}
+.saved-note { margin-top: 10px; color: #15803d; font-weight: 600; }
+.hidden { display: none !important; }
+
+.form-pane h2 { font-size: 15px; margin: 20px 20px 6px; padding: 6px 0; border-bottom: 2px solid #c7b8e6; color: #4b3b78; max-width: 560px; }
+.form-pane h3 { font-size: 13px; margin: 0 0 8px; color: #fff; background: #2563a8; padding: 8px 12px; }
+.field-label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
+.field select { padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+.field .note { color: #64748b; font-size: 12px; margin-left: 8px; }
+.sup-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
+.sup-tabs .tab { padding: 6px 14px; text-decoration: underline; color: #1d4ed8; font-size: 13px; }
+.sup-tabs .tab.active { font-weight: 700; }
+#supListPane, #supSearchPane { border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; }
+.add-standard { max-width: 560px; margin: 0 20px; border: 1px solid #2563a8; border-radius: 6px; overflow: hidden; }
+.add-standard #procSearch { width: calc(100% - 24px); margin: 10px 12px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+#procList { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; }
+.proc_row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid #eef2f7; }
+.proc_row .add { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; background: #e0f2fe; color: #0369a1; border-radius: 5px; text-decoration: none; font-weight: 700; }
+.proc_row .cpt { color: #94a3b8; width: 24px; }
+#selectedProcs { width: calc(100% - 40px); margin: 8px 20px; border-collapse: collapse; }
+#selectedProcs td { border: 1px solid #e2e8f0; padding: 6px 8px; font-size: 13px; }
+.add-standard, #selectedProcs, #procSearch { box-sizing: border-box; }
+textarea#procNotes { width: 100%; min-height: 70px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; }
+.inline { margin-left: 10px; font-size: 13px; }
