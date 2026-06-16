@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>auto-mate panel (demo)</title>
+    <link rel="stylesheet" href="../extension/sidepanel/sidepanel.css" />
+  </head>
+  <body>
+    <header class="app-header">
+      <h1>auto&#8209;mate</h1>
+      <span class="tagline">log in yourself &middot; let auto&#8209;mate do the rest</span>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab active" data-tab="setup">1. Learn</button>
+      <button class="tab" data-tab="data">2. Data</button>
+      <button class="tab" data-tab="run">3. Run</button>
+      <button class="tab" data-tab="report">Report</button>
+    </nav>
+
+    <section class="panel active" data-panel="setup">
+      <p class="hint">
+        auto&#8209;mate watches you fill the form <b>one time</b> and remembers how. Open the form in the
+        active tab, log in yourself, then start learning.
+      </p>
+      <div id="recipeStatus" class="status-line"></div>
+      <button id="btnStartLearn" class="primary">Start Learn mode</button>
+      <button id="btnFinishLearn" class="primary hidden">Finish &amp; review</button>
+      <div id="learnSteps" class="steps hidden">
+        <h3>Captured steps</h3>
+        <p class="hint">Tell auto&#8209;mate what each step was. Unlabeled steps are ignored.</p>
+        <ol id="stepList"></ol>
+        <button id="btnSaveRecipe" class="primary">Save recipe</button>
+      </div>
+      <details class="advanced">
+        <summary>Manage recipe</summary>
+        <button id="btnViewRecipe" class="ghost">View JSON</button>
+        <button id="btnClearRecipe" class="ghost danger">Clear recipe</button>
+        <pre id="recipeJson" class="json-view hidden"></pre>
+      </details>
+    </section>
+
+    <section class="panel" data-panel="data">
+      <div id="dropzone" class="dropzone">
+        <div class="dz-inner">
+          <strong>Drag your Slicer Dicer export here</strong>
+          <span>.xlsx, .xls or .csv &mdash; or click to browse</span>
+        </div>
+        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
+      </div>
+      <div id="fileInfo" class="status-line"></div>
+      <div id="mappingBox" class="hidden">
+        <h3>Column mapping</h3>
+        <div class="map-grid">
+          <label>Date<select data-map="date"></select></label>
+          <label>Supervisor<select data-map="supervisor"></select></label>
+          <label>Patient MRN<select data-map="mrn"></select></label>
+          <label>Procedure<select data-map="procedure"></select></label>
+        </div>
+        <label class="checkline">
+          <input type="checkbox" id="groupProcedures" checked />
+          Combine multiple procedure rows that share the same MRN + date
+        </label>
+        <h3>Preview <span id="rowCount" class="muted"></span></h3>
+        <div id="preview" class="preview"></div>
+      </div>
+    </section>
+
+    <section class="panel" data-panel="run">
+      <div id="runReadiness" class="status-line"></div>
+      <label class="checkline">
+        <input type="checkbox" id="dryRun" checked />
+        <b>Dry run</b> &mdash; fill everything but do <b>not</b> submit (recommended first)
+      </label>
+      <label class="rangeline">
+        Delay between fields: <span id="delayVal">250</span> ms
+        <input type="range" id="fieldDelay" min="0" max="1500" step="50" value="250" />
+      </label>
+      <div class="run-buttons">
+        <button id="btnRun" class="primary">Start</button>
+        <button id="btnStop" class="ghost danger hidden">Stop</button>
+      </div>
+      <div id="progressWrap" class="hidden">
+        <div class="progressbar"><div id="progressFill"></div></div>
+        <div id="progressText" class="muted"></div>
+      </div>
+      <div id="liveLog" class="live-log"></div>
+    </section>
+
+    <section class="panel" data-panel="report">
+      <div id="reportSummary" class="status-line">No session yet.</div>
+      <div class="run-buttons">
+        <button id="btnExportHtml" class="ghost">Export HTML</button>
+        <button id="btnExportCsv" class="ghost">Export CSV</button>
+        <button id="btnExportJson" class="ghost">Export JSON</button>
+      </div>
+      <div id="reportBody" class="report-body"></div>
+    </section>
+
+    <div id="toast" class="toast hidden"></div>
+
+    <script>
+      window.__FAA_CTX = 'panel';
+    </script>
+    <script src="chrome-shim.js"></script>
+    <script src="../extension/common/messages.js"></script>
+    <script src="../extension/vendor/xlsx.full.min.js"></script>
+    <script src="../extension/sidepanel/parser.js"></script>
+    <script src="../extension/sidepanel/report.js"></script>
+    <script src="../extension/sidepanel/sidepanel.js"></script>
+  </body>
+</html>

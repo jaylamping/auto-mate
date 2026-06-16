@@ -35,6 +35,35 @@ and can be pointed at other forms too.
 
 ---
 
+## Try it without installing (demo harness)
+
+For UX review you can run the **real** side panel + content scripts as a plain
+web page against a built-in mock MedHub form — no extension install, no login.
+
+```bash
+# from the repo root
+python3 -m http.server 8777
+# then open: http://localhost:8777/demo/demo.html
+```
+
+The left pane is a mock MedHub "Add Procedure" form; the right pane is the
+actual auto-mate side panel (a `chrome.*` shim wires them together and backs
+storage with `localStorage`). Click through Learn → Data (drop
+[`extension/samples/slicer-dicer-sample.csv`](extension/samples/slicer-dicer-sample.csv))
+→ Run (dry-run) → Report.
+
+You can also drive it headlessly and capture screenshots:
+
+```bash
+npm install            # installs puppeteer-core (dev only)
+node demo/drive.js     # screenshots land in demo/screenshots/
+```
+
+> The demo is for UX/UI iteration only. Real selectors still come from running
+> Learn mode against the live MedHub form in the installed extension.
+
+---
+
 ## Install (load unpacked)
 
 auto-mate is distributed as an unpacked Chrome extension.

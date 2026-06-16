@@ -1,0 +1,127 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>auto-mate demo &mdash; mock MedHub form + live panel</title>
+    <link rel="stylesheet" href="demo.css" />
+  </head>
+  <body>
+    <div class="demo-bar">
+      <strong>auto-mate demo</strong>
+      <span>Left: a mock MedHub "Add Procedure" form. Right: the real auto-mate side panel. No install, no login &mdash; for UX review only.</span>
+    </div>
+
+    <div class="demo-split">
+      <!-- LEFT: mock MedHub procedure form (same markup as the test fixture) -->
+      <main class="form-pane">
+        <div class="medhub-chrome">ahc.medhub.com/u/r/procedures.mh</div>
+        <h1>Log Procedure</h1>
+        <form id="procForm">
+          <div class="field">
+            <label for="proc_date">Procedure Date</label>
+            <input type="text" id="proc_date" name="date" placeholder="MM/DD/YYYY" />
+          </div>
+          <div class="field">
+            <label for="proc_location">Location</label>
+            <input type="text" id="proc_location" name="location" />
+          </div>
+          <div class="field">
+            <label for="sup_search">Supervisor</label>
+            <input type="text" id="sup_search" name="supervisor_search" autocomplete="off" aria-label="Supervisor" />
+            <ul class="ac_results" id="sup_results" style="display:none"></ul>
+            <input type="hidden" id="sup_id" name="supervisor_id" />
+          </div>
+          <div class="field">
+            <label for="patient_mrn">Patient MRN</label>
+            <input type="text" id="patient_mrn" name="patient" />
+          </div>
+          <div class="field">
+            <label for="proc_search">Procedure</label>
+            <input type="text" id="proc_search" name="procedure_search" autocomplete="off" aria-label="Procedure" />
+            <ul class="ac_results" id="proc_results" style="display:none"></ul>
+            <ul id="selected_procedures"></ul>
+          </div>
+          <button type="button" id="submitBtn">Save Procedure</button>
+          <div id="savedNote" class="saved-note hidden">Saved! (mock)</div>
+        </form>
+      </main>
+
+      <!-- RIGHT: the actual side panel UI in an iframe -->
+      <aside class="panel-pane">
+        <iframe id="panelFrame" src="panel.html" title="auto-mate panel"></iframe>
+      </aside>
+    </div>
+
+    <!-- Mock MedHub autocomplete behavior (mirrors the jQuery ac_results pattern) -->
+    <script>
+      (function () {
+        var SUPERVISORS = [
+          { id: 11, name: 'Smith, John MD' },
+          { id: 22, name: 'Smithson, Karen MD' },
+          { id: 33, name: 'Lee, Karen MD' },
+          { id: 44, name: 'Diaz Sierra, Alejandra MD' }
+        ];
+        var PROCEDURES = ['Colonoscopy', 'Polypectomy', 'Upper Endoscopy', 'Biopsy', 'Cardiac Catheterization'];
+        function render(ul, items, text) {
+          ul.innerHTML = '';
+          if (!items.length) { ul.style.display = 'none'; return; }
+          items.forEach(function (it) {
+            var li = document.createElement('li');
+            li.className = 'ac_item';
+            li.textContent = text(it);
+            li.dataset.value = text(it);
+            ul.appendChild(li);
+          });
+          ul.style.display = 'block';
+        }
+        var supInput = document.getElementById('sup_search');
+        var supResults = document.getElementById('sup_results');
+        supInput.addEventListener('input', function () {
+          var q = supInput.value.trim().toLowerCase();
+          if (!q) return (supResults.style.display = 'none');
+          render(supResults, SUPERVISORS.filter(function (s) { return s.name.toLowerCase().indexOf(q) !== -1; }), function (s) { return s.name; });
+        });
+        supResults.addEventListener('click', function (e) {
+          var li = e.target.closest('li.ac_item'); if (!li) return;
+          supInput.value = li.dataset.value;
+          document.getElementById('sup_id').value = li.dataset.value;
+          supResults.style.display = 'none';
+        });
+        var procInput = document.getElementById('proc_search');
+        var procResults = document.getElementById('proc_results');
+        procInput.addEventListener('input', function () {
+          var q = procInput.value.trim().toLowerCase();
+          if (!q) return (procResults.style.display = 'none');
+          render(procResults, PROCEDURES.filter(function (p) { return p.toLowerCase().indexOf(q) !== -1; }), function (p) { return p; });
+        });
+        procResults.addEventListener('click', function (e) {
+          var li = e.target.closest('li.ac_item'); if (!li) return;
+          var chip = document.createElement('li');
+          chip.className = 'proc_chip';
+          chip.textContent = li.dataset.value;
+          document.getElementById('selected_procedures').appendChild(chip);
+          procInput.value = '';
+          procResults.style.display = 'none';
+        });
+        document.getElementById('submitBtn').addEventListener('click', function () {
+          var n = document.getElementById('savedNote');
+          n.classList.remove('hidden');
+          setTimeout(function () { n.classList.add('hidden'); }, 1200);
+        });
+      })();
+    </script>
+
+    <!-- auto-mate content scripts run here, in the "page" context -->
+    <script>
+      window.__FAA_CTX = 'content';
+    </script>
+    <script src="chrome-shim.js"></script>
+    <script src="../extension/common/messages.js"></script>
+    <script src="../extension/common/dom-utils.js"></script>
+    <script src="../extension/content/recorder.js"></script>
+    <script src="../extension/content/engine.js"></script>
+    <script src="../extension/content/overlay.js"></script>
+    <script src="../extension/content/content.js"></script>
+  </body>
+</html>
