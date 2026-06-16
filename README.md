@@ -35,6 +35,21 @@ and can be pointed at other forms too.
 
 ---
 
+## Styling (shadcn + Tailwind)
+
+The side panel uses **shadcn/ui design tokens** (slate dark theme) via **Tailwind CSS**. Source styles live in [`extension/sidepanel/input.css`](extension/sidepanel/input.css); the compiled bundle is [`extension/sidepanel/sidepanel.css`](extension/sidepanel/sidepanel.css).
+
+After editing styles:
+
+```bash
+npm install
+npm run build:css    # or npm run dev:css while iterating
+```
+
+No React build — component classes (`btn-primary`, `card`, `tabs-list`, etc.) are plain CSS compiled from Tailwind `@apply`, which keeps the extension loadable as unpacked files.
+
+---
+
 ## Try it without installing (demo harness)
 
 For UX review you can run the **real** side panel + content scripts as a plain

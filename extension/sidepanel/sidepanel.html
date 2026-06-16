@@ -1,109 +1,155 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>auto-mate</title>
     <link rel="stylesheet" href="sidepanel.css" />
   </head>
-  <body>
-    <header class="app-header">
-      <h1>auto&#8209;mate</h1>
-      <span class="tagline">log in yourself &middot; let auto&#8209;mate do the rest</span>
+  <body class="min-h-screen">
+    <header class="border-b px-4 py-4">
+      <div class="flex flex-col gap-0.5">
+        <h1 class="text-lg font-semibold tracking-tight">auto&#8209;mate</h1>
+        <p class="text-xs text-muted-foreground">Log in yourself &middot; let auto&#8209;mate do the rest</p>
+      </div>
     </header>
 
-    <nav class="tabs">
-      <button class="tab active" data-tab="setup">1. Learn</button>
-      <button class="tab" data-tab="data">2. Data</button>
-      <button class="tab" data-tab="run">3. Run</button>
-      <button class="tab" data-tab="report">Report</button>
+    <nav class="border-b px-3 py-3">
+      <div class="tabs-list" role="tablist">
+        <button type="button" class="tab-trigger active" data-tab="setup" role="tab">1. Learn</button>
+        <button type="button" class="tab-trigger" data-tab="data" role="tab">2. Data</button>
+        <button type="button" class="tab-trigger" data-tab="run" role="tab">3. Run</button>
+        <button type="button" class="tab-trigger" data-tab="report" role="tab">Report</button>
+      </div>
     </nav>
 
-    <!-- LEARN -->
-    <section class="panel active" data-panel="setup">
-      <p class="hint">
-        auto&#8209;mate watches you fill the form <b>one time</b> and remembers how. Open the form in the
-        active tab, log in yourself, then start learning.
-      </p>
-      <div id="recipeStatus" class="status-line"></div>
-      <button id="btnStartLearn" class="primary">Start Learn mode</button>
-      <button id="btnFinishLearn" class="primary hidden">Finish &amp; review</button>
-
-      <div id="learnSteps" class="steps hidden">
-        <h3>Captured steps</h3>
-        <p class="hint">Tell auto&#8209;mate what each step was. Unlabeled steps are ignored.</p>
-        <ol id="stepList"></ol>
-        <button id="btnSaveRecipe" class="primary">Save recipe</button>
-      </div>
-
-      <details class="advanced">
-        <summary>Manage recipe</summary>
-        <button id="btnViewRecipe" class="ghost">View JSON</button>
-        <button id="btnClearRecipe" class="ghost danger">Clear recipe</button>
-        <pre id="recipeJson" class="json-view hidden"></pre>
-      </details>
-    </section>
-
-    <!-- DATA -->
-    <section class="panel" data-panel="data">
-      <div id="dropzone" class="dropzone">
-        <div class="dz-inner">
-          <strong>Drag your Slicer Dicer export here</strong>
-          <span>.xlsx, .xls or .csv &mdash; or click to browse</span>
+    <main class="p-4 space-y-4">
+      <!-- LEARN -->
+      <section class="panel active space-y-4" data-panel="setup">
+        <div class="alert-muted">
+          auto&#8209;mate watches you fill the form <strong>one time</strong> and remembers how. Open the MedHub
+          procedure form in the active tab, log in yourself, then start learning.
         </div>
-        <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
-      </div>
-      <div id="fileInfo" class="status-line"></div>
 
-      <div id="mappingBox" class="hidden">
-        <h3>Column mapping</h3>
-        <div class="map-grid">
-          <label>Date<select data-map="date"></select></label>
-          <label>Supervisor<select data-map="supervisor"></select></label>
-          <label>Patient MRN<select data-map="mrn"></select></label>
-          <label>Procedure<select data-map="procedure"></select></label>
+        <div id="recipeStatus" class="text-sm min-h-[1.25rem]"></div>
+
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="btnStartLearn" class="btn-primary">Start Learn mode</button>
+          <button type="button" id="btnFinishLearn" class="btn-primary hidden">Finish &amp; review</button>
         </div>
-        <label class="checkline">
-          <input type="checkbox" id="groupProcedures" checked />
-          Combine multiple procedure rows that share the same MRN + date
+
+        <div id="learnSteps" class="card hidden">
+          <div class="card-header">
+            <h3 class="card-title">Captured steps</h3>
+            <p class="card-description">Steps are auto-labeled from field names and your spreadsheet. Adjust any that look wrong, then save.</p>
+          </div>
+          <div class="card-content space-y-3">
+            <ol id="stepList" class="space-y-3 list-none p-0 m-0"></ol>
+            <button type="button" id="btnSaveRecipe" class="btn-primary w-full">Save recipe</button>
+          </div>
+        </div>
+
+        <details class="rounded-lg border px-3 py-2 text-sm">
+          <summary class="cursor-pointer text-muted-foreground font-medium">Manage recipe</summary>
+          <div class="mt-3 flex flex-wrap gap-2">
+            <button type="button" id="btnViewRecipe" class="btn-outline btn-sm">View JSON</button>
+            <button type="button" id="btnClearRecipe" class="btn-destructive btn-sm">Clear recipe</button>
+          </div>
+          <pre id="recipeJson" class="code-block hidden"></pre>
+        </details>
+      </section>
+
+      <!-- DATA -->
+      <section class="panel space-y-4" data-panel="data">
+        <div id="dropzone" class="dropzone">
+          <div class="space-y-1">
+            <p class="text-sm font-medium">Drag your Slicer Dicer export here</p>
+            <p class="text-xs text-muted-foreground">.xlsx, .xls or .csv &mdash; or click to browse</p>
+          </div>
+          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
+        </div>
+        <div id="fileInfo" class="text-sm min-h-[1.25rem]"></div>
+
+        <div id="mappingBox" class="card hidden">
+          <div class="card-header">
+            <h3 class="card-title">Column mapping</h3>
+            <p class="card-description">auto-mate guessed these from your headers. Override if needed.</p>
+          </div>
+          <div class="card-content space-y-4">
+            <div class="grid grid-cols-2 gap-3">
+              <label class="space-y-1.5">
+                <span class="label">Date</span>
+                <select class="select" data-map="date"></select>
+              </label>
+              <label class="space-y-1.5">
+                <span class="label">Supervisor</span>
+                <select class="select" data-map="supervisor"></select>
+              </label>
+              <label class="space-y-1.5">
+                <span class="label">Patient MRN</span>
+                <select class="select" data-map="mrn"></select>
+              </label>
+              <label class="space-y-1.5">
+                <span class="label">Procedure</span>
+                <select class="select" data-map="procedure"></select>
+              </label>
+            </div>
+            <label class="form-row cursor-pointer">
+              <input type="checkbox" id="groupProcedures" checked class="mt-0.5 rounded border-input" />
+              <span class="text-sm leading-snug">Combine multiple procedure rows that share the same MRN + date</span>
+            </label>
+            <div>
+              <div class="mb-2 flex items-baseline justify-between gap-2">
+                <h4 class="text-sm font-medium">Preview</h4>
+                <span id="rowCount" class="text-xs text-muted-foreground"></span>
+              </div>
+              <div id="preview" class="preview-table-wrap"></div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- RUN -->
+      <section class="panel space-y-4" data-panel="run">
+        <div id="runReadiness" class="text-sm min-h-[1.25rem]"></div>
+
+        <label class="form-row cursor-pointer border rounded-lg">
+          <input type="checkbox" id="dryRun" checked class="mt-0.5 rounded border-input" />
+          <span class="text-sm leading-snug"><strong>Dry run</strong> &mdash; fill everything but do <strong>not</strong> submit (recommended first)</span>
         </label>
-        <h3>Preview <span id="rowCount" class="muted"></span></h3>
-        <div id="preview" class="preview"></div>
-      </div>
-    </section>
 
-    <!-- RUN -->
-    <section class="panel" data-panel="run">
-      <div id="runReadiness" class="status-line"></div>
-      <label class="checkline">
-        <input type="checkbox" id="dryRun" checked />
-        <b>Dry run</b> &mdash; fill everything but do <b>not</b> submit (recommended first)
-      </label>
-      <label class="rangeline">
-        Delay between fields: <span id="delayVal">250</span> ms
-        <input type="range" id="fieldDelay" min="0" max="1500" step="50" value="250" />
-      </label>
-      <div class="run-buttons">
-        <button id="btnRun" class="primary">Start</button>
-        <button id="btnStop" class="ghost danger hidden">Stop</button>
-      </div>
-      <div id="progressWrap" class="hidden">
-        <div class="progressbar"><div id="progressFill"></div></div>
-        <div id="progressText" class="muted"></div>
-      </div>
-      <div id="liveLog" class="live-log"></div>
-    </section>
+        <label class="space-y-2 block">
+          <div class="flex items-center justify-between text-sm">
+            <span>Delay between fields</span>
+            <span class="text-muted-foreground"><span id="delayVal">250</span> ms</span>
+          </div>
+          <input type="range" id="fieldDelay" min="0" max="1500" step="50" value="250" class="w-full accent-primary" />
+        </label>
 
-    <!-- REPORT -->
-    <section class="panel" data-panel="report">
-      <div id="reportSummary" class="status-line">No session yet.</div>
-      <div class="run-buttons">
-        <button id="btnExportHtml" class="ghost">Export HTML</button>
-        <button id="btnExportCsv" class="ghost">Export CSV</button>
-        <button id="btnExportJson" class="ghost">Export JSON</button>
-      </div>
-      <div id="reportBody" class="report-body"></div>
-    </section>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="btnRun" class="btn-primary">Start</button>
+          <button type="button" id="btnStop" class="btn-destructive hidden">Stop</button>
+        </div>
+
+        <div id="progressWrap" class="hidden space-y-2">
+          <div class="progress"><div id="progressFill" class="progress-indicator" style="width:0"></div></div>
+          <p id="progressText" class="text-xs text-muted-foreground"></p>
+        </div>
+
+        <div id="liveLog" class="live-log"></div>
+      </section>
+
+      <!-- REPORT -->
+      <section class="panel space-y-4" data-panel="report">
+        <div id="reportSummary" class="alert-muted">No session yet.</div>
+        <div class="flex flex-wrap gap-2">
+          <button type="button" id="btnExportHtml" class="btn-outline btn-sm">Export HTML</button>
+          <button type="button" id="btnExportCsv" class="btn-outline btn-sm">Export CSV</button>
+          <button type="button" id="btnExportJson" class="btn-outline btn-sm">Export JSON</button>
+        </div>
+        <div id="reportBody" class="report-body code-block font-sans text-xs"></div>
+      </section>
+    </main>
 
     <div id="toast" class="toast hidden"></div>
 

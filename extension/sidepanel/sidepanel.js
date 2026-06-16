@@ -33,9 +33,9 @@
   }
 
   // ---- Tabs ----
-  $$('.tab').forEach((tab) => {
+  $$('.tab-trigger').forEach((tab) => {
     tab.addEventListener('click', () => {
-      $$('.tab').forEach((t) => t.classList.remove('active'));
+      $$('.tab-trigger').forEach((t) => t.classList.remove('active'));
       $$('.panel').forEach((p) => p.classList.remove('active'));
       tab.classList.add('active');
       $(`.panel[data-panel="${tab.dataset.tab}"]`).classList.add('active');
@@ -191,6 +191,7 @@
       const guess = step._field != null ? step._field : autoGuessField(step);
       step._field = guess;
       const select = document.createElement('select');
+      select.className = 'select';
       FIELD_OPTIONS.forEach((opt) => {
         const o = document.createElement('option');
         o.value = opt.value;
@@ -209,7 +210,7 @@
         `&middot; <code>${escapeHtml(String(sel).slice(0, 50))}</code>` +
         (step.sampleOptionText ? `<br>picked: "${escapeHtml(step.sampleOptionText)}"` : '');
       const wrap = document.createElement('div');
-      wrap.className = 'step-row';
+      wrap.className = 'step-item';
       wrap.appendChild(select);
       wrap.appendChild(meta);
       li.appendChild(wrap);
@@ -271,9 +272,9 @@
     const el = $('#recipeStatus');
     if (state.recipe) {
       const fields = state.recipe.steps.map((s) => s.field).join(', ');
-      el.innerHTML = `Saved recipe (${state.recipe.steps.length} steps): <b>${escapeHtml(fields)}</b>`;
+      el.innerHTML = `<span class="badge-secondary">Recipe saved</span> ${state.recipe.steps.length} steps: <strong>${escapeHtml(fields)}</strong>`;
     } else {
-      el.textContent = 'No recipe saved yet.';
+      el.innerHTML = '<span class="text-muted-foreground">No recipe saved yet.</span>';
     }
   }
 
@@ -373,10 +374,10 @@
     if (!state.recipe) issues.push('no recipe (do step 1)');
     if (!state.engineRows.length) issues.push('no data loaded (do step 2)');
     if (issues.length) {
-      el.innerHTML = `Not ready: ${issues.join(' and ')}.`;
+      el.innerHTML = `<span class="badge-outline border-amber-500/50 text-amber-400">Not ready</span> ${issues.join(' and ')}.`;
       $('#btnRun').disabled = true;
     } else {
-      el.innerHTML = `Ready: <b>${state.engineRows.length}</b> entries against saved recipe.`;
+      el.innerHTML = `<span class="badge-secondary">Ready</span> <strong>${state.engineRows.length}</strong> entries against saved recipe.`;
       $('#btnRun').disabled = false;
     }
   }
@@ -481,9 +482,10 @@
     if (!state.session) return;
     const s = REPORT.summarize(state.session);
     $('#reportSummary').innerHTML =
-      `${s.dryRun ? '<b>DRY RUN</b> &middot; ' : ''}` +
-      `Total ${s.total} &middot; <span class="o-success">${s.succeeded} ok</span> &middot; ` +
-      `<span class="o-failed">${s.failed} failed</span> &middot; ${s.skipped} stopped`;
+      `${s.dryRun ? '<span class="badge-outline mr-1">DRY RUN</span>' : ''}` +
+      `<span class="badge-secondary mr-1">Total ${s.total}</span> ` +
+      `<span class="text-emerald-500">${s.succeeded} ok</span> · ` +
+      `<span class="text-destructive">${s.failed} failed</span> · ${s.skipped} stopped`;
     $('#reportBody').innerHTML = REPORT.toHTML(state.session)
       .replace(/^[\s\S]*<body>/, '')
       .replace(/<\/body>[\s\S]*$/, '');

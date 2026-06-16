@@ -62,7 +62,7 @@ async function main() {
   await sleep(200);
 
   // --- Data: load the sample CSV via the hidden file input ---
-  await panel.click('.tab[data-tab="data"]');
+  await panel.click('.tab-trigger[data-tab="data"]');
   await sleep(100);
   const fileInput = await panel.$('#fileInput');
   await fileInput.uploadFile(path.join(__dirname, '../extension/samples/slicer-dicer-sample.csv'));
@@ -72,7 +72,7 @@ async function main() {
   console.log(`  data preview: ${rowCount}`);
 
   // --- Run (dry run) ---
-  await panel.click('.tab[data-tab="run"]');
+  await panel.click('.tab-trigger[data-tab="run"]');
   await sleep(100);
   await panel.$eval('#fieldDelay', (el) => {
     el.value = '0';
@@ -90,7 +90,7 @@ async function main() {
   await page.screenshot({ path: path.join(OUT, '04-run-log.png') });
 
   // --- Report ---
-  await panel.click('.tab[data-tab="report"]');
+  await panel.click('.tab-trigger[data-tab="report"]');
   await sleep(200);
   await page.screenshot({ path: path.join(OUT, '05-report.png') });
   const summary = await panel.$eval('#reportSummary', (el) => el.textContent.trim()).catch(() => '');
