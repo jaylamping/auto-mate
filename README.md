@@ -2,8 +2,8 @@
 
 **auto-mate** is a Chrome extension that fills out a web form repeatedly from a
 spreadsheet — using *your own* logged-in browser session. You log in yourself,
-show auto-mate how to fill the form **one time** ("Learn mode"), then drop in
-your spreadsheet and let it do the rest.
+show auto-mate how to fill the form **one time** ("Learn mode") after loading your
+spreadsheet, then let it do the rest.
 
 It was built for logging procedures into **MedHub** (`ahc.medhub.com`, the
 *Procedures* tab) from an **Epic Slicer Dicer** spreadsheet export — by date,
@@ -24,8 +24,8 @@ and can be pointed at other forms too.
 
 1. [Install (load unpacked)](#install-load-unpacked)
 2. [The 3-step workflow](#the-3-step-workflow)
-3. [Step 1 — Learn mode (detailed)](#step-1--learn-mode-detailed)
-4. [Step 2 — Load your spreadsheet](#step-2--load-your-spreadsheet)
+3. [Step 1 — Load your spreadsheet](#step-1--load-your-spreadsheet)
+4. [Step 2 — Learn mode (detailed)](#step-2--learn-mode-detailed)
 5. [Step 3 — Run](#step-3--run)
 6. [The session report](#the-session-report)
 7. [Spreadsheet format](#spreadsheet-format)
@@ -63,9 +63,9 @@ python3 -m http.server 8777
 
 The left pane is a mock MedHub "Add Procedure" form; the right pane is the
 actual auto-mate side panel (a `chrome.*` shim wires them together and backs
-storage with `localStorage`). Click through Learn → Data (drop
-[`extension/samples/slicer-dicer-sample.csv`](extension/samples/slicer-dicer-sample.csv))
-→ Run (dry-run) → Report.
+storage with `localStorage`). Click through **Data** → **Learn** → **Run** (drop
+[`extension/samples/slicer-dicer-sample.csv`](extension/samples/slicer-dicer-sample.csv)
+on the Data tab first).
 
 You can also drive it headlessly and capture screenshots:
 
@@ -97,16 +97,29 @@ auto-mate is distributed as an unpacked Chrome extension.
 ## The 3-step workflow
 
 ```
-  Log in yourself  ─▶  1. Learn (once)  ─▶  2. Load spreadsheet  ─▶  3. Run
+  Log in yourself  ─▶  1. Load spreadsheet  ─▶  2. Learn (once)  ─▶  3. Run
 ```
 
 Open the form you want to fill in a normal tab and **log in manually**. Then
-click the auto-mate icon to open its side panel. The panel has three tabs that
-match the workflow: **Learn**, **Data**, **Run** (plus a **Report** tab).
+click the auto-mate icon to open its side panel. The panel has four tabs that
+match the workflow: **Data**, **Learn**, **Run** (plus a **Report** tab).
+
+**Upload your spreadsheet first** — Learn mode stays disabled until a file is loaded, so auto-mate can map columns to form fields as you record.
 
 ---
 
-## Step 1 — Learn mode (detailed)
+## Step 1 — Load your spreadsheet
+
+1. Open the auto-mate side panel — you'll land on the **Data** tab.
+2. **Drag your Slicer Dicer export** (`.xlsx`, `.xls`, or `.csv`) onto the drop
+   zone — or click it to browse.
+3. auto-mate cleans the data behind the scenes and shows a **preview table**.
+4. Check the **Column mapping** (Date, Supervisor, Patient MRN, Procedure). Override if needed.
+5. Click **Continue to Learn →**.
+
+---
+
+## Step 2 — Learn mode (detailed)
 
 Learn mode is a **one-time** setup. auto-mate watches you fill the form once and
 remembers *where* each field is and *how* it behaves (including search/
@@ -120,7 +133,7 @@ this again — unless the form itself changes.
 
 ### Recording
 
-1. Open the auto-mate side panel and go to the **Learn** tab.
+1. Go to the **Learn** tab (after your spreadsheet is loaded).
 2. Click **Start Learn mode**. A small dark badge appears in the bottom-right of
    the page: *"Learn mode is recording."*
 3. **Fill the form exactly as you normally would**, one field at a time:
@@ -167,32 +180,9 @@ If the website changes and a field stops working, open **Learn → Manage recipe
 
 ---
 
-## Step 2 — Load your spreadsheet
-
-1. Go to the **Data** tab.
-2. **Drag your Slicer Dicer export** (`.xlsx`, `.xls`, or `.csv`) onto the drop
-   zone — or click it to browse. auto-mate parses it automatically; there is no
-   "import" button.
-3. auto-mate cleans the data behind the scenes (trims headers, drops blank
-   leading rows, normalizes dates, preserves MRNs including leading zeros) and
-   shows a **preview table**.
-4. Check the **Column mapping**. auto-mate auto-detects common Slicer Dicer
-   column names, but you can override any of them:
-   - Date → your date column
-   - Supervisor → attending/supervisor column
-   - Patient MRN → MRN column
-   - Procedure → procedure column
-5. **Multiple procedures per patient:** leave *"Combine multiple procedure rows
-   that share the same MRN + date"* checked if your export lists each procedure
-   on its own row. auto-mate will merge them into a single entry with several
-   procedures. (A single cell with several procedures separated by `;`, `,`,
-   `|`, or `/` is also supported.)
-
----
-
 ## Step 3 — Run
 
-1. Go to the **Run** tab. It shows whether you're ready (recipe + data present).
+1. Go to the **Run** tab. It shows whether you're ready (spreadsheet + recipe).
 2. **Leave "Dry run" checked the first time.** In dry-run, auto-mate fills every
    field exactly as it would live, but **does not click Submit** — so you can
    watch it and confirm the supervisor and procedures resolve correctly.
@@ -242,6 +232,8 @@ Location is **not** read from the spreadsheet — it is always `IMC`.
 
 | Symptom | Fix |
 | --- | --- |
+| Demo 404 on `/demo/demo.html` | Run the server from the **repo root** (`C:\code\auto-mate`), not a subfolder. Use branch `cursor/form-autofill-extension-58d5` (the `demo/` folder is not on `main` yet). Open **http://localhost:8780/demo/demo.html** (not `0.0.0.0`). |
+| "Start Learn mode" is disabled | Upload your spreadsheet on the **Data** tab first. |
 | "Could not attach to this page." | Reload the form tab, then reopen the panel. The page must finish loading first. |
 | Learn captured nothing | Make sure you actually clicked into and typed in the fields; then click **Finish & review**. |
 | A supervisor/procedure isn't selected | The spreadsheet text must be close enough to match a dropdown result. Check spelling; the search needs to return a result that contains your text. |

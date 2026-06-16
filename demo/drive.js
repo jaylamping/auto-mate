@@ -36,8 +36,29 @@ async function main() {
 
   await page.screenshot({ path: path.join(OUT, '01-initial.png') });
 
+  // --- Data first (required before Learn) ---
+  const fileInput = await panel.$('#fileInput');
+  await fileInput.uploadFile(path.join(__dirname, '../extension/samples/slicer-dicer-sample.csv'));
+  await panel.evaluate(() => {
+    const el = document.getElementById('fileInput');
+    if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  await sleep(400);
+  const rowCount = await panel.$eval('#rowCount', (el) => el.textContent).catch(() => '?');
+  console.log(`  data preview: ${rowCount}`);
+  await page.screenshot({ path: path.join(OUT, '02-data-loaded.png') });
+  await panel.evaluate(() => document.getElementById('btnGoLearn').click());
+  await sleep(200);
+  await panel.waitForFunction(
+    () => {
+      const btn = document.querySelector('#btnStartLearn');
+      return btn && !btn.disabled && !btn.classList.contains('hidden');
+    },
+    { timeout: 5000 }
+  );
+
   // --- Learn mode (mirrors the real MedHub flow) ---
-  await panel.click('#btnStartLearn');
+  await panel.evaluate(() => document.getElementById('btnStartLearn').click());
   await sleep(150);
   await page.type('#procedureDate', '06/15/2026', { delay: 8 });
   await page.type('#locationSpecify', 'IMC', { delay: 8 });
@@ -54,24 +75,14 @@ async function main() {
   await sleep(150);
   await panel.click('#btnFinishLearn');
   await sleep(200);
-  await page.screenshot({ path: path.join(OUT, '02-learn-captured.png') });
+  await page.screenshot({ path: path.join(OUT, '03-learn-captured.png') });
 
   const stepCount = await panel.$$eval('#stepList > li', (els) => els.length);
   console.log(`  captured steps in UI: ${stepCount}`);
   await panel.click('#btnSaveRecipe');
   await sleep(200);
 
-  // --- Data: load the sample CSV via the hidden file input ---
-  await panel.click('.tab-trigger[data-tab="data"]');
-  await sleep(100);
-  const fileInput = await panel.$('#fileInput');
-  await fileInput.uploadFile(path.join(__dirname, '../extension/samples/slicer-dicer-sample.csv'));
-  await sleep(400);
-  await page.screenshot({ path: path.join(OUT, '03-data-mapping.png') });
-  const rowCount = await panel.$eval('#rowCount', (el) => el.textContent).catch(() => '?');
-  console.log(`  data preview: ${rowCount}`);
-
-  // --- Run (dry run) ---
+  // --- Data tab already loaded; open Run ---
   await panel.click('.tab-trigger[data-tab="run"]');
   await sleep(100);
   await panel.$eval('#fieldDelay', (el) => {
