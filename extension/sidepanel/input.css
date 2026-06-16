@@ -287,6 +287,14 @@
     @apply fixed bottom-28 left-4 right-4 z-50 rounded-lg border bg-popover px-4 py-3 text-popover-foreground shadow-lg;
   }
 
+  /* Live-run confirmation */
+  .modal-overlay {
+    @apply fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm;
+  }
+  .modal-card {
+    @apply w-full max-w-sm rounded-lg border bg-card p-4 text-card-foreground shadow-lg;
+  }
+
   /* Checkbox row */
   .form-row {
     @apply flex items-start gap-2 rounded-md border border-transparent p-2 hover:bg-muted/40;
@@ -412,20 +420,6 @@
     display: none !important;
   }
 
-  .log-success {
-    @apply text-emerald-600 dark:text-emerald-400;
-  }
-  .log-failed {
-    @apply text-destructive;
-  }
-  .log-skipped,
-  .log-aborted {
-    @apply text-amber-600 dark:text-amber-400;
-  }
-  .log-info {
-    @apply text-muted-foreground;
-  }
-
   .panel {
     @apply hidden;
   }
@@ -435,4 +429,32 @@
   .panel-mapping.active {
     @apply space-y-2;
   }
+}
+.live-log .log-failed,
+.live-log .log-outcome-failed {
+  color: hsl(var(--destructive));
+  font-weight: 600;
+}
+.live-log .log-success,
+.live-log .log-outcome-success {
+  color: rgb(5 150 105);
+}
+.dark .live-log .log-success,
+.dark .live-log .log-outcome-success {
+  color: rgb(52 211 153);
+}
+.live-log .log-skipped,
+.live-log .log-aborted,
+.live-log .log-outcome-skipped,
+.live-log .log-outcome-aborted {
+  color: rgb(217 119 6);
+}
+.dark .live-log .log-skipped,
+.dark .live-log .log-aborted,
+.dark .live-log .log-outcome-skipped,
+.dark .live-log .log-outcome-aborted {
+  color: rgb(251 191 36);
+}
+.live-log .log-info {
+  color: hsl(var(--muted-foreground));
 }

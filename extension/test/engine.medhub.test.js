@@ -96,4 +96,48 @@ module.exports = async function run() {
     assert.strictEqual(selected[0].children[1].textContent, 'Biopsy', 'exact Biopsy wins over Biopsy w/ scalpel');
     console.log('  engine.medhub: exact procedure name beats longer similar sibling.');
   }
+
+  // ---- Stale recipe: NOTES INPUT bound to supervisor search must not type notes there ----
+  {
+    const page = createPage('medhub-procedure-log.html');
+    const { document, ENGINE, MSG } = page;
+    const { ROLE, FIELD } = MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    const badRecipe = {
+      version: 1,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('#procedureDate') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('#locationSpecify') },
+        {
+          field: FIELD.NOTES,
+          role: ROLE.INPUT,
+          candidates: css('#supSearch')
+        },
+        {
+          field: FIELD.SUPERVISOR,
+          role: ROLE.AUTOCOMPLETE,
+          optionSelector: 'li.sup_result',
+          candidates: css('#supSearch')
+        },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('#encounterText') },
+        { field: FIELD.SUBMIT, role: ROLE.SUBMIT, candidates: css('#logProcedure') }
+      ]
+    };
+    const notesRow = {
+      ...row,
+      notes: 'Procedure note should not land in supervisor search',
+      procedures: []
+    };
+    const result = await ENGINE.runRow(badRecipe, notesRow, {
+      dryRun: true,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0
+    });
+    assert.ok(result.ok, 'run should continue when mis-bound notes step is skipped');
+    assert.strictEqual(document.getElementById('supSearch').value, '', 'supervisor search stays empty until supervisor step');
+    const notesAction = result.actions.find((a) => a.field === 'notes' && a.role === 'input');
+    assert.ok(notesAction && notesAction.outcome === 'skipped', 'mis-bound notes step skipped');
+    assert.strictEqual(document.getElementById('supChosen').value, 'Smith, John MD', 'supervisor still picked');
+    console.log('  engine.medhub: notes INPUT on supervisor search is skipped at replay.');
+  }
 };

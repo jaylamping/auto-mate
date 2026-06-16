@@ -69,5 +69,16 @@ module.exports = {
       }
     }
   },
-  plugins: [require('tailwindcss-animate')]
+  plugins: [require('tailwindcss-animate')],
+  safelist: [
+    'log-success',
+    'log-failed',
+    'log-skipped',
+    'log-aborted',
+    'log-info',
+    'log-outcome-failed',
+    'log-outcome-success',
+    'log-outcome-skipped',
+    'log-outcome-aborted'
+  ]
 };

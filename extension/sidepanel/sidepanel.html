@@ -141,6 +141,17 @@
 
     <div id="toast" class="toast hidden"></div>
 
+    <div id="liveConfirmModal" class="modal-overlay hidden" role="dialog" aria-modal="true" aria-labelledby="liveConfirmTitle">
+      <div class="modal-card">
+        <h2 id="liveConfirmTitle" class="text-lg font-semibold tracking-tight">Live run</h2>
+        <p id="liveConfirmBody" class="mt-2 text-sm text-muted-foreground leading-snug"></p>
+        <div class="mt-4 flex flex-wrap justify-end gap-2">
+          <button type="button" id="liveConfirmCancel" class="btn-outline">Cancel</button>
+          <button type="button" id="liveConfirmOk" class="btn-destructive">Submit entries</button>
+        </div>
+      </div>
+    </div>
+
     <script src="../common/messages.js"></script>
     <script src="quotes.js"></script>
     <script src="kanye-images.js"></script>

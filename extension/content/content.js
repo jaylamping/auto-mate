@@ -103,18 +103,20 @@
         return true;
       }
 
+      case MSG.CLEAR_OVERLAY:
+        OVERLAY.hideBadge();
+        sendResponse({ ok: true });
+        return true;
+
       case MSG.RUN_ROW: {
         const { recipe, row, index, total, dryRun, fieldDelayMs } = message.payload;
-        OVERLAY.setBadge(
-          `<b>auto-mate</b><br>${dryRun ? 'DRY RUN' : 'Running'} row ${index + 1} of ${total}` +
-            (row.mrn ? `<br>MRN ${row.mrn}` : '')
-        );
         ENGINE.runRow(recipe, row, {
           dryRun,
           fieldDelayMs,
           onAction: (entry) => toPanel(MSG.ACTION_LOG, { index, entry })
         })
           .then((result) => {
+            OVERLAY.hideBadge();
             toPanel(MSG.ROW_DONE, { index, total, result, mrn: row.mrn });
           })
           .catch((err) => {

@@ -38,6 +38,25 @@ assert.strictEqual(
   'name in header beats provider when both match'
 );
 
+const { autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, ROLE, FIELD } = root.FAA_MSG;
+assert.strictEqual(
+  autoGuessField({
+    role: ROLE.INPUT,
+    text: 'Supervisor search',
+    sampleValue: 'Procedure completed without complication'
+  }),
+  FIELD.SUPERVISOR,
+  'supervisor label wins over procedure word in pasted notes value'
+);
+assert.strictEqual(
+  guessFieldFromLabel('Procedure Notes', ROLE.INPUT),
+  FIELD.NOTES,
+  'procedure notes label maps to notes'
+);
+assert.strictEqual(headerAllowedForFieldKey('Procedure Notes', FIELD.SUPERVISOR), false);
+assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.SUPERVISOR), true);
+assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.NOTES), false);
+
 // --- Build an in-memory workbook from the sample CSV ---
 const csv = fs.readFileSync(path.join(__dirname, '../samples/slicer-dicer-sample.csv'), 'utf8');
 const wb = root.XLSX.read(csv, { type: 'string' });

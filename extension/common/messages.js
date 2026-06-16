@@ -16,6 +16,7 @@
     STOP_RUN: 'faa:stop-run',
     HIGHLIGHT_FIELD: 'faa:highlight-field',
     SCAN_FORM: 'faa:scan-form',
+    CLEAR_OVERLAY: 'faa:clear-overlay',
 
     // Content -> side panel
     PONG: 'faa:pong',
@@ -29,7 +30,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '4';
+  const BUILD_ID = '6';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -136,6 +137,65 @@
     return best;
   }
 
+  /** Guess logical field from label / accessible name only (not cell values). */
+  function guessFieldFromLabel(text, role) {
+    const hay = String(text || '').toLowerCase();
+    if (!hay) return '';
+    if (role === ROLE.SUBMIT) return FIELD.SUBMIT;
+    if (role === ROLE.CLICK) return FIELD.CLICK;
+    if (/procedure\s*date|date of service|\bdos\b/.test(hay)) return FIELD.DATE;
+    if (/^date\b|\bdate\b/.test(hay) && !/update/.test(hay)) return FIELD.DATE;
+    if (/location|site|facility/.test(hay)) return FIELD.LOCATION;
+    if (/supervis|attending|precept/.test(hay)) return FIELD.SUPERVISOR;
+    if (/encounter|mrn|patient id|medical record/.test(hay)) return FIELD.ENCOUNTER;
+    if (/patient gender|\bgender\b|\bsex\b/.test(hay)) return FIELD.GENDER;
+    if (/patient age|\bage\b/.test(hay)) return FIELD.AGE;
+    if (/diagnos|\bicd\b|\bdx\b/.test(hay)) return FIELD.DIAGNOSIS;
+    if (/complicat/.test(hay)) return FIELD.COMPLICATIONS;
+    if (/procedure\s*notes?|\bcomments?\b/.test(hay)) return FIELD.NOTES;
+    if (/procedure|cpt/.test(hay)) return FIELD.PROCEDURE;
+    if (role === ROLE.AUTOCOMPLETE) {
+      if (/supervis|attending/.test(hay)) return FIELD.SUPERVISOR;
+      return FIELD.PROCEDURE;
+    }
+    return '';
+  }
+
+  /** Label first; only use short typed prefixes from sampleValue when label is empty. */
+  function autoGuessField(step) {
+    const fromLabel = guessFieldFromLabel(step.text, step.role);
+    if (fromLabel) return fromLabel;
+    const sample = String(step.sampleValue || '');
+    if (sample && sample.length <= 48) {
+      const fromValue = guessFieldFromLabel(sample, step.role);
+      if (fromValue) return fromValue;
+    }
+    if (step.role === ROLE.AUTOCOMPLETE) return FIELD.PROCEDURE;
+    return '';
+  }
+
+  function isNotesLikeHeader(header) {
+    const hl = String(header || '').toLowerCase();
+    return /\bprocedure\s*notes?\b|\bnotes?\b|\bcomments?\b/.test(hl);
+  }
+
+  function isSupervisorLikeHeader(header) {
+    const hl = String(header || '').toLowerCase();
+    return /supervis|attending|precept/.test(hl);
+  }
+
+  /** Block supervisor↔notes column cross-mapping from value-only infer. */
+  function headerAllowedForFieldKey(header, fieldKey) {
+    if (!fieldKey || !header) return true;
+    if (fieldKey === FIELD.SUPERVISOR && isNotesLikeHeader(header) && !isSupervisorLikeHeader(header)) {
+      return false;
+    }
+    if (fieldKey === FIELD.NOTES && isSupervisorLikeHeader(header) && !isNotesLikeHeader(header)) {
+      return false;
+    }
+    return true;
+  }
+
   const api = {
     MSG,
     ROLE,
@@ -150,7 +210,12 @@
     valueMatchesCell,
     MIN_VALUE_MATCH_SUBSTRING_LEN,
     columnInferPreferenceScore,
-    pickPreferredColumnMatch
+    pickPreferredColumnMatch,
+    guessFieldFromLabel,
+    autoGuessField,
+    headerAllowedForFieldKey,
+    isNotesLikeHeader,
+    isSupervisorLikeHeader
   };
 
   // Expose on window (side panel + content scripts share window in their realm).

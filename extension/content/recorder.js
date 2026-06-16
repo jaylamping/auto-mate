@@ -266,6 +266,11 @@
   function flushPendingTypeAsInput() {
     if (!pendingType || pendingType.emitted || !wasFieldInteracted(pendingType.el)) return;
     if (!valueChangedSinceFocus(pendingType.el)) return;
+    // Procedure search without clicking "+" / a result is not a completed pick.
+    if (isProcedureSearchField(pendingType.el)) {
+      pendingType.emitted = true;
+      return;
+    }
     emit({
         role: ROLE.INPUT,
         candidates: pendingType.candidates,

@@ -6,7 +6,7 @@
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
 (function () {
-  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch } = window.FAA_MSG;
+  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey } = window.FAA_MSG;
   const PARSER = window.FAA_PARSER;
   const REPORT = window.FAA_REPORT;
 
@@ -97,7 +97,7 @@
   }
 
   function hasDocumentedWorkflow() {
-    return state.recordedSteps.length > 0;
+    return isProcedureRegistered() || state.recordedSteps.some((s) => s.role === ROLE.SUBMIT);
   }
 
   function isColumnMappingComplete() {
@@ -199,10 +199,11 @@
   }
 
   function isProcedureLearnStep(step) {
-    if (!step) return false;
-    if (step._field === FIELD.PROCEDURE) return true;
-    if (step.clickRel === 'a.add') return true;
-    if (step.optionSelector && /proc_row|proc/i.test(step.optionSelector)) return true;
+    if (!step || step.role !== ROLE.AUTOCOMPLETE) return false;
+    if (step.clickRel && /\badd\b/i.test(step.clickRel)) return true;
+    const opt = String(step.optionSelector || '');
+    const picked = String(step.sampleOptionText || '').trim();
+    if (picked && /proc_row|proc/i.test(opt)) return true;
     return false;
   }
 
@@ -218,6 +219,12 @@
 
   function normalizeLearnStep(step) {
     if (!step._field) step._field = autoGuessField(step);
+    else if (step.role === ROLE.INPUT && step.text) {
+      const fromLabel = guessFieldFromLabel(step.text, step.role);
+      if (fromLabel && fromLabel !== FIELD.CLICK && fromLabel !== step._field) {
+        step._field = fromLabel;
+      }
+    }
     if (isProcedureLearnStep(step)) step._field = FIELD.PROCEDURE;
   }
 
@@ -367,6 +374,12 @@
   function onLiveFieldInput(live) {
     if (!live || (!live.blurred && !live.debounced)) return;
     const step = { ...live, _field: autoGuessField(live) };
+    if (
+      step.role === ROLE.INPUT &&
+      guessFieldFromLabel(step.text, step.role) === FIELD.PROCEDURE
+    ) {
+      return;
+    }
     if (!shouldRunFieldMapping(step)) return;
     const mapKey = STEP_FIELD_TO_MAP[step._field];
     if (!mapKey) return;
@@ -399,28 +412,6 @@
     [FIELD.COMPLICATIONS]: FIELD.COMPLICATIONS,
     [FIELD.NOTES]: FIELD.NOTES
   };
-
-  function autoGuessField(step) {
-    const hay = `${step.text || ''} ${step.sampleValue || ''}`.toLowerCase();
-    if (step.role === ROLE.SUBMIT) return FIELD.SUBMIT;
-    if (step.role === ROLE.CLICK) return FIELD.CLICK;
-    if (/procedure\s*date|date of service|\bdos\b/.test(hay)) return FIELD.DATE;
-    if (/^date\b|\bdate\b/.test(hay) && !/update/.test(hay)) return FIELD.DATE;
-    if (/location|site|facility/.test(hay)) return FIELD.LOCATION;
-    if (/supervis|attending|precept/.test(hay)) return FIELD.SUPERVISOR;
-    if (/encounter|mrn|patient id|medical record/.test(hay)) return FIELD.ENCOUNTER;
-    if (/patient gender|\bgender\b|\bsex\b/.test(hay)) return FIELD.GENDER;
-    if (/patient age|\bage\b/.test(hay)) return FIELD.AGE;
-    if (/diagnos|\bicd\b|\bdx\b/.test(hay)) return FIELD.DIAGNOSIS;
-    if (/complicat/.test(hay)) return FIELD.COMPLICATIONS;
-    if (/procedure\s*notes?|\bcomments?\b/.test(hay)) return FIELD.NOTES;
-    if (/procedure|cpt/.test(hay)) return FIELD.PROCEDURE;
-    if (step.role === ROLE.AUTOCOMPLETE) {
-      if (/supervis|attending/.test(hay)) return FIELD.SUPERVISOR;
-      return FIELD.PROCEDURE;
-    }
-    return '';
-  }
 
   function flashMapRow(mapKey) {
     const row = document.querySelector(`.map-field-row[data-form-field="${mapKey}"]`);
@@ -593,8 +584,10 @@
     if (!typed || typed.length < minLen) return null;
 
     const rows = state.parsed.rows.slice(0, 100);
-    const matches = state.parsed.headers.filter((h) =>
-      rows.some((row) => valueMatchesCell(row[h], typed))
+    const matches = state.parsed.headers.filter(
+      (h) =>
+        headerAllowedForFieldKey(h, mapKey) &&
+        rows.some((row) => valueMatchesCell(row[h], typed))
     );
     if (!matches.length) return null;
 
@@ -645,7 +638,14 @@
       toast('Document one procedure on the form first — that teaches us where each field lives.');
       return;
     }
-    const steps = recorded.filter((s) => !isSupervisorSearchTabLearnStep(s)).map(stepToRecipeStep);
+    const steps = recorded
+      .filter((s) => !isSupervisorSearchTabLearnStep(s))
+      .filter((s) => {
+        if (s.role !== ROLE.INPUT || !s.text) return true;
+        const fromLabel = guessFieldFromLabel(s.text, s.role);
+        return !fromLabel || fromLabel === FIELD.CLICK || fromLabel === s._field;
+      })
+      .map(stepToRecipeStep);
     const tab = await getActiveTab();
     const recipe = {
       version: 1,
@@ -817,18 +817,45 @@
     logLine('Stop requested.', 'info');
   });
 
+  function confirmLiveRun(entryCount) {
+    return new Promise((resolve) => {
+      const modal = $('#liveConfirmModal');
+      const body = $('#liveConfirmBody');
+      const okBtn = $('#liveConfirmOk');
+      const cancelBtn = $('#liveConfirmCancel');
+      if (!modal || !body || !okBtn || !cancelBtn) {
+        resolve(false);
+        return;
+      }
+      body.textContent =
+        `auto-mate will submit ${entryCount} entries to the form on this page. This cannot be undone.`;
+      modal.classList.remove('hidden');
+      const onOk = () => cleanup(true);
+      const onCancel = () => cleanup(false);
+      function cleanup(ok) {
+        modal.classList.add('hidden');
+        okBtn.removeEventListener('click', onOk);
+        cancelBtn.removeEventListener('click', onCancel);
+        resolve(ok);
+      }
+      okBtn.addEventListener('click', onOk);
+      cancelBtn.addEventListener('click', onCancel);
+    });
+  }
+
   async function runSession() {
     if (!state.recipe || !state.engineRows.length) return;
     const dryRun = $('#dryRun').checked;
     const fieldDelayMs = parseInt($('#fieldDelay').value, 10);
 
     if (!dryRun) {
-      const ok = confirm(
-        `LIVE RUN: auto-mate will submit ${state.engineRows.length} entries to the form. ` +
-          `This cannot be undone. Continue?`
-      );
+      const ok = await confirmLiveRun(state.engineRows.length);
       if (!ok) return;
     }
+
+    try {
+      await sendToTab(MSG.CLEAR_OVERLAY);
+    } catch (_) {}
 
     state.running = true;
     state.session = { startedAt: new Date().toISOString(), dryRun, rows: [] };
@@ -877,7 +904,6 @@
     state.maxTabIndex = Math.max(state.maxTabIndex, TAB_ORDER.indexOf('report'));
     refreshTabLocks();
     logLine('Session complete. See Report tab.', 'info');
-    toast('Session complete - see Report tab.');
   }
 
   function runOneRow(row, index, total, dryRun, fieldDelayMs) {
@@ -895,17 +921,35 @@
   }
 
   function onActionLog({ index, entry }) {
-    const cls = `log-${entry.outcome}`;
     const detail = entry.detail ? ` (${entry.detail})` : '';
-    const val = entry.value != null ? ` = "${entry.value}"` : '';
-    const chosen = entry.chosen ? ` -> "${entry.chosen}"` : '';
-    logLine(`  [${entry.field}] ${entry.outcome}${val}${chosen}${detail}`, entry.outcome);
+    const val = entry.value != null ? ` = "${escapeHtml(String(entry.value))}"` : '';
+    const chosen = entry.chosen ? ` -> "${escapeHtml(String(entry.chosen))}"` : '';
+    const outcomeHtml = formatOutcomeLabel(entry.outcome);
+    logLine(
+      `  [${escapeHtml(String(entry.field))}] ${outcomeHtml}${val}${chosen}${escapeHtml(detail)}`,
+      entry.outcome,
+      true
+    );
   }
 
-  function logLine(text, kind = 'info') {
+  function formatOutcomeLabel(outcome) {
+    if (outcome === 'failed') return '<span class="log-outcome-failed">failed</span>';
+    if (outcome === 'success') return '<span class="log-outcome-success">success</span>';
+    if (outcome === 'skipped') return '<span class="log-outcome-skipped">skipped</span>';
+    if (outcome === 'aborted') return '<span class="log-outcome-aborted">aborted</span>';
+    return escapeHtml(String(outcome || ''));
+  }
+
+  function logLine(text, kind = 'info', asHtml = false) {
     const div = document.createElement('div');
     div.className = `log-${kind}`;
-    div.textContent = text;
+    if (asHtml) {
+      div.innerHTML = text;
+    } else if (kind === 'failed') {
+      div.innerHTML = escapeHtml(text).replace(/\bfailed\b/gi, '<span class="log-outcome-failed">failed</span>');
+    } else {
+      div.textContent = text;
+    }
     const log = $('#liveLog');
     log.appendChild(div);
     log.scrollTop = log.scrollHeight;

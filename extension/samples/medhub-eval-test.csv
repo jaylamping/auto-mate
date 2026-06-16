@@ -1,0 +1,19 @@
+Date of Service,Attending Provider,Patient MRN,Procedure Name,Patient Gender,Patient Age,Diagnosis,Complications,Procedure Notes
+2026-01-05,"Smith, John",000123456,Colonoscopy,M,45,Screening colonoscopy,None,Routine screening — supervisor on List tab
+2026-01-05,"Smith, John",000123456,Polypectomy,M,45,Polyp removal,,
+2026-01-06,"Lee, Karen",000987654,Cardiac catheterization,F,62,Dyspepsia,,Supervisor via Search tab (not on List)
+2026-01-07,Smithson Karen,000555221,Cardiac catheterization,F,58,,None,Attending without comma — blank diagnosis
+2026-01-08,"Diaz Sierra, Alejandra",000444333,Biopsy,F,34,Suspicious lesion,,Long name — blank complications + notes
+2026-01-09,Smith John,000333222,Cardioversion,,71,Atrial fibrillation,None,Blank gender
+2026-01-10,"Lee,Karen",000222111,Colonoscopy,F,,Change in bowel habits,None,Blank age
+2026-01-11,"Smith, John",000111000,"Colonoscopy; Biopsy",M,50,Screening with biopsy,,Multi-procedure — blank complications + notes
+2026-01-12,"Smithson, Karen",000100999,Cardiac MRI,F,66,,None,Blank diagnosis
+2026-01-13,"Lee, Karen",000099888,Biopsy w/ scalpel,F,41,Skin lesion,Minor bleeding,
+2026-01-14,"Smith, John",000088777,Ablation,,,,,All optional fields blank
+2026-01-15,"Diaz Sierra, Alejandra",000077666,Angio Carotid,F,72,Carotid stenosis,,
+2026-01-16,"Smith, John",000012345,Colonoscopy,F,8,Pediatric screening,None,MRN leading zeros + single-digit age
+2026-01-17,"Smith, John",000066555,Colonoscopy,F,,Routine,,Blank age + notes
+2026-01-18,Dr Nobody MD,000055444,Colonoscopy,M,40,Test row,None,INTENTIONAL FAIL — supervisor not in MedHub
+2026-01-19,,000044333,Colonoscopy,M,52,Missing supervisor test,,BLANK attending — should skip row
+2026-01-20,"Smith, John",,Colonoscopy,F,33,Missing MRN test,,BLANK MRN — should skip row
+2026-01-21,"Smith, John",000033221,,M,44,Missing procedure test,,BLANK procedure — should skip row

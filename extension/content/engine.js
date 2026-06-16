@@ -173,6 +173,42 @@
     return null;
   }
 
+  function elementFieldHay(el) {
+    if (!el) return '';
+    const name = DOM.accessibleNameFor ? DOM.accessibleNameFor(el) : '';
+    return `${el.id || ''} ${el.name || ''} ${name}`.toLowerCase();
+  }
+
+  function isSupervisorLikeElement(el) {
+    return /supervis|attending|precept/.test(elementFieldHay(el));
+  }
+
+  function isNotesLikeElement(el) {
+    return /procedure\s*notes?|\bnotes?\b|\bcomments?\b/.test(elementFieldHay(el));
+  }
+
+  function isTextEntry(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'textarea') return true;
+    if (el.isContentEditable) return true;
+    if (tag === 'input') {
+      const t = (el.getAttribute('type') || 'text').toLowerCase();
+      return ['text', 'search', 'email', 'tel', 'url', 'number', 'date', ''].includes(t);
+    }
+    return false;
+  }
+
+  function findSupervisorSearchInput() {
+    const byId = document.getElementById('supSearch') || document.getElementById('sup_search');
+    if (byId && isTextEntry(byId)) return byId;
+    const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])');
+    for (const el of nodes) {
+      if (isTextEntry(el) && isSupervisorLikeElement(el)) return el;
+    }
+    return null;
+  }
+
   function visibleSupervisorOptions(optionSelector) {
     return Array.from(document.querySelectorAll(optionSelector || 'li.sup_result'))
       .filter((o) => DOM.isVisible(o) && extractOptionLabel(o).length > 0);
@@ -254,7 +290,8 @@
       if (fromList) return fromList;
     }
 
-    let inputEl = DOM.resolveElement(step.candidates) || document.getElementById('supSearch');
+    let inputEl = findSupervisorSearchInput();
+    if (!inputEl) inputEl = DOM.resolveElement(step.candidates);
     if (!inputEl) throw new Error('Supervisor search input not found');
 
     return selectSupervisorFromSearch(inputEl, step.optionSelector, query, opts);
@@ -324,6 +361,33 @@
     return chosenText;
   }
 
+  const OPTIONAL_FIELDS = new Set([
+    FIELD.GENDER,
+    FIELD.AGE,
+    FIELD.DIAGNOSIS,
+    FIELD.COMPLICATIONS,
+    FIELD.NOTES
+  ]);
+
+  function isOptionalField(field) {
+    return OPTIONAL_FIELDS.has(field);
+  }
+
+  function shouldResolveWithoutVisibility(step, found) {
+    if (!found) return false;
+    if (step.role === ROLE.AUTOCOMPLETE && step.field === FIELD.SUPERVISOR) return true;
+    if (step.role === ROLE.INPUT && step.field === FIELD.NOTES && !isNotesLikeElement(found)) return true;
+    if (
+      step.role === ROLE.INPUT &&
+      step.field === FIELD.SUPERVISOR &&
+      !isSupervisorLikeElement(found) &&
+      found.tagName.toLowerCase() !== 'select'
+    ) {
+      return true;
+    }
+    return false;
+  }
+
   function valueForField(field, row) {
     switch (field) {
       case FIELD.DATE:
@@ -382,7 +446,7 @@
         const el = await waitFor(() => {
           const found = DOM.resolveElement(step.candidates);
           if (!found) return null;
-          if (step.role === ROLE.AUTOCOMPLETE && step.field === FIELD.SUPERVISOR) return found;
+          if (shouldResolveWithoutVisibility(step, found)) return found;
           return DOM.isVisible(found) ? found : null;
         });
         const needsVisibleEl =
@@ -390,6 +454,16 @@
           !isSkippableSupervisorNavClick(step) &&
           !(step.role === ROLE.AUTOCOMPLETE && step.field === FIELD.SUPERVISOR);
         if (!el && needsVisibleEl) {
+          if (isOptionalField(step.field)) {
+            record({
+              field: step.field,
+              role: step.role,
+              outcome: 'skipped',
+              detail: 'Field not found on page'
+            });
+            await sleep(fieldDelayMs);
+            continue;
+          }
           record({ field: step.field, role: step.role, outcome: 'failed', detail: 'Field not found on page' });
           return { ok: false, actions, failedField: step.field };
         }
@@ -419,6 +493,29 @@
           const v = valueForField(step.field, row);
           if (v == null || v === '') {
             record({ field: step.field, role: step.role, outcome: 'skipped', detail: 'No value in row' });
+          } else if (
+            step.field === FIELD.NOTES &&
+            el &&
+            !isNotesLikeElement(el)
+          ) {
+            record({
+              field: step.field,
+              role: step.role,
+              outcome: 'skipped',
+              detail: 'Wrong target for Procedure Notes — not typing into supervisor/search field'
+            });
+          } else if (
+            step.field === FIELD.SUPERVISOR &&
+            el &&
+            !isSupervisorLikeElement(el) &&
+            el.tagName.toLowerCase() !== 'select'
+          ) {
+            record({
+              field: step.field,
+              role: step.role,
+              outcome: 'skipped',
+              detail: 'Wrong target for Supervisor'
+            });
           } else if (el.tagName.toLowerCase() === 'select') {
             setNativeValue(el, String(v));
             fireInput(el);
