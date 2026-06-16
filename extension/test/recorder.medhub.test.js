@@ -88,4 +88,26 @@ module.exports = async function run() {
     assert.ok(supAuto.sampleOptionText, 'supervisor autocomplete should carry picked label');
     console.log('  recorder.medhub: supervisor result click records autocomplete without pending type.');
   }
+
+  // Typing in procedure search without clicking "+" is not a completed pick.
+  {
+    const page3 = createPage('medhub-procedure-log.html');
+    const { window: w3, document: d3, RECORDER: REC3 } = page3;
+    const steps4 = [];
+    REC3.start((step) => steps4.push(step));
+    typeValue(w3, d3.getElementById('procSearch'), 'Colonoscopy');
+    await sleep(20);
+    clickEl(w3, d3.getElementById('encounterText'));
+    await sleep(10);
+    REC3.stop();
+    const procAutoOnly = steps4.filter(
+      (s) => s.role === 'autocomplete' && /proc_row/i.test(s.optionSelector || '')
+    );
+    assert.strictEqual(procAutoOnly.length, 0, 'search-only should not record procedure autocomplete');
+    assert.ok(
+      !steps4.some((s) => s.role === 'input' && /proc/i.test(`${s.text || ''} ${s.sampleValue || ''}`)),
+      'search-only should not flush as procedure input step'
+    );
+    console.log('  recorder.medhub: procedure search without "+" is not recorded as a pick.');
+  }
 };

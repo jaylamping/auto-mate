@@ -414,8 +414,68 @@
     }
   }
 
+  function isProcedureRemoveControl(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = el.tagName.toLowerCase();
+    if (tag !== 'a' && tag !== 'button' && el.getAttribute('role') !== 'button') return false;
+    const hay = `${el.className || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`.toLowerCase();
+    if (/\bremove\b|\bdelete\b|\bunspec/.test(hay)) return true;
+    const txt = (el.textContent || '').trim();
+    return txt === '×' || txt === '✕' || txt === 'X' || txt === 'x';
+  }
+
+  function findSelectedProcedureRows() {
+    const rows = [];
+    const seen = new Set();
+    const selectors = [
+      '#selectedProcs tr.selected_proc',
+      '#selectedProcs .selected_proc',
+      '#selected_procedures li.proc_chip',
+      '#selected_procedures li',
+      'tr.selected_proc',
+      '.selected_proc'
+    ];
+    for (const sel of selectors) {
+      try {
+        for (const row of document.querySelectorAll(sel)) {
+          if (!row || row.id === 'noProcRow' || seen.has(row)) continue;
+          seen.add(row);
+          rows.push(row);
+        }
+      } catch (_) {}
+    }
+    return rows;
+  }
+
+  function findProcedureRemoveControl(row) {
+    if (!row) return null;
+    const candidates = row.querySelectorAll('a, button, [role="button"], input[type="button"], input[type="image"]');
+    for (const el of candidates) {
+      if (isProcedureRemoveControl(el)) return el;
+    }
+    return null;
+  }
+
+  async function clearSelectedProcedures(fieldDelayMs = 100) {
+    let cleared = 0;
+    const pause = Math.min(fieldDelayMs, 150);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      let clicked = false;
+      for (const row of findSelectedProcedureRows()) {
+        const btn = findProcedureRemoveControl(row);
+        if (!btn || !DOM.isVisible(btn)) continue;
+        btn.click();
+        cleared++;
+        clicked = true;
+        await sleep(pause);
+      }
+      if (!clicked) break;
+      await sleep(80);
+    }
+    return cleared;
+  }
+
   /**
-   * Run a single row against the recipe.
    * @param {object} recipe
    * @param {object} row normalized { date, supervisor, mrn, procedures:[], location? }
    * @param {object} opts { dryRun, onAction, fieldDelayMs }
@@ -423,7 +483,7 @@
    */
   async function runRow(recipe, row, opts = {}) {
     resetAbort();
-    const { dryRun = false, onAction = () => {}, fieldDelayMs = 250, autocompleteTimeoutMs, typeCharDelayMs } = opts;
+    const { dryRun = false, onAction = () => {}, fieldDelayMs = 200, autocompleteTimeoutMs, typeCharDelayMs } = opts;
     const acOpts = {
       autocompleteTimeoutMs,
       typeCharDelayMs: typeCharDelayMs != null ? typeCharDelayMs : DEFAULT_TYPE_CHAR_MS
@@ -435,6 +495,16 @@
       actions.push(full);
       onAction(full);
     };
+
+    const clearedProcs = await clearSelectedProcedures(fieldDelayMs);
+    if (clearedProcs > 0) {
+      record({
+        field: FIELD.PROCEDURE,
+        role: ROLE.CLICK,
+        outcome: 'success',
+        detail: `Cleared ${clearedProcs} prior procedure(s)`
+      });
+    }
 
     for (const step of recipe.steps) {
       if (abortFlag) {

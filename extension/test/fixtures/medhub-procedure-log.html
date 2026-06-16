@@ -165,6 +165,20 @@
             r.style.display = !qk || name.indexOf(qk) !== -1 ? '' : 'none';
           });
         });
+        document.getElementById('selectedProcs').addEventListener('click', function (e) {
+          var remove = e.target.closest('a.remove, button.remove');
+          if (!remove) return;
+          e.preventDefault();
+          var tr = remove.closest('tr.selected_proc');
+          if (tr) tr.remove();
+          var tbody = document.querySelector('#selectedProcs tbody');
+          if (tbody && !tbody.querySelector('.selected_proc')) {
+            var placeholder = document.createElement('tr');
+            placeholder.id = 'noProcRow';
+            placeholder.innerHTML = '<td>(no procedures -- at least one is required)</td>';
+            tbody.appendChild(placeholder);
+          }
+        });
         document.getElementById('procList').addEventListener('click', function (e) {
           var add = e.target.closest('a.add');
           if (!add) return;
@@ -174,7 +188,10 @@
           if (noRow) noRow.remove();
           var tr = document.createElement('tr');
           tr.className = 'selected_proc';
-          tr.innerHTML = '<td>--</td><td>' + row.getAttribute('data-name') + '</td><td>Performed</td>';
+          tr.innerHTML =
+            '<td>--</td><td>' +
+            row.getAttribute('data-name') +
+            '</td><td>Performed</td><td><a href="#" class="remove" title="Remove procedure">×</a></td>';
           document.querySelector('#selectedProcs tbody').appendChild(tr);
           // Reset the filter as the live page does.
           procSearch.value = '';

@@ -17,6 +17,7 @@
     HIGHLIGHT_FIELD: 'faa:highlight-field',
     SCAN_FORM: 'faa:scan-form',
     CLEAR_OVERLAY: 'faa:clear-overlay',
+    CLOSE_SIDE_PANEL: 'faa:close-side-panel',
 
     // Content -> side panel
     PONG: 'faa:pong',
@@ -30,7 +31,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '6';
+  const BUILD_ID = '10';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {

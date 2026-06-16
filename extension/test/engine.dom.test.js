@@ -51,7 +51,10 @@ module.exports = async function run() {
 
     const chips = document.querySelectorAll('#selected_procedures .proc_chip');
     assert.strictEqual(chips.length, 2, 'both procedures selected');
-    assert.deepStrictEqual(Array.from(chips).map((c) => c.textContent), ['Colonoscopy', 'Biopsy']);
+    assert.deepStrictEqual(
+      Array.from(chips).map((c) => (c.querySelector('.proc_chip_label') || c).textContent.trim()),
+      ['Colonoscopy', 'Biopsy']
+    );
 
     assert.notStrictEqual(document.body.getAttribute('data-submitted'), 'true', 'dry run must NOT submit');
     const submitAction = result.actions.find((a) => a.field === 'submit');

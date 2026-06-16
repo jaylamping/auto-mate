@@ -106,6 +106,8 @@ async function run() {
   assert.ok(REPORT.toHTML(session).includes('auto-mate session report'));
   assert.ok(REPORT.toHTML(session, { filter: 'failed' }).includes('Row 2'));
   assert.ok(!REPORT.toHTML(session, { filter: 'success' }).includes('Row 2'));
+  assert.ok(REPORT.toBodyHtml(session, { filter: 'failed' }).includes('Row 2'));
+  assert.ok(!REPORT.toBodyHtml(session, { filter: 'success' }).includes('Row 2'));
   assert.strictEqual(REPORT.filterRows(session.rows, 'failed').length, 1);
   assert.ok(REPORT.toCSV(session).split('\r\n').length >= 3);
   assert.ok(JSON.parse(REPORT.toJSON(session)).summary.total === 2);

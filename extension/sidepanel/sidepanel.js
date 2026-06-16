@@ -28,7 +28,8 @@
     maxTabIndex: 0,
     learnRecording: false,
     fieldRevealOrder: [],
-    reportFilter: 'all'
+    reportFilter: 'all',
+    awaitingLiveConfirm: false
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -97,7 +98,7 @@
   }
 
   function hasDocumentedWorkflow() {
-    return isProcedureRegistered() || state.recordedSteps.some((s) => s.role === ROLE.SUBMIT);
+    return isProcedureRegistered();
   }
 
   function isColumnMappingComplete() {
@@ -201,10 +202,11 @@
   function isProcedureLearnStep(step) {
     if (!step || step.role !== ROLE.AUTOCOMPLETE) return false;
     if (step.clickRel && /\badd\b/i.test(step.clickRel)) return true;
-    const opt = String(step.optionSelector || '');
     const picked = String(step.sampleOptionText || '').trim();
-    if (picked && /proc_row|proc/i.test(opt)) return true;
-    return false;
+    if (!picked) return false;
+    if (guessFieldFromLabel(step.text, ROLE.AUTOCOMPLETE) === FIELD.PROCEDURE) return true;
+    const opt = String(step.optionSelector || '');
+    return /proc_row|proc_row/i.test(opt);
   }
 
   function isProcedureRegistered() {
@@ -817,33 +819,72 @@
     logLine('Stop requested.', 'info');
   });
 
+  let liveConfirmResolve = null;
+
+  function setupLiveConfirmModal() {
+    const modal = $('#liveConfirmModal');
+    const okBtn = $('#liveConfirmOk');
+    const cancelBtn = $('#liveConfirmCancel');
+    if (!modal || !okBtn || !cancelBtn) return;
+
+    okBtn.addEventListener('click', () => {
+      if (!liveConfirmResolve) return;
+      const resolve = liveConfirmResolve;
+      liveConfirmResolve = null;
+      state.awaitingLiveConfirm = false;
+      modal.close('ok');
+      resolve(true);
+    });
+    cancelBtn.addEventListener('click', () => {
+      if (!liveConfirmResolve) return;
+      const resolve = liveConfirmResolve;
+      liveConfirmResolve = null;
+      state.awaitingLiveConfirm = false;
+      modal.close('cancel');
+      resolve(false);
+    });
+    modal.addEventListener('cancel', (e) => {
+      e.preventDefault();
+      if (!liveConfirmResolve) return;
+      const resolve = liveConfirmResolve;
+      liveConfirmResolve = null;
+      state.awaitingLiveConfirm = false;
+      resolve(false);
+    });
+  }
+
   function confirmLiveRun(entryCount) {
+    const modal = $('#liveConfirmModal');
+    const body = $('#liveConfirmBody');
+    const msg =
+      `Dry run is off. auto-mate will fill and submit ${entryCount} entries on this page automatically. This cannot be undone.`;
+
+    if (!modal || typeof modal.showModal !== 'function') {
+      return Promise.resolve(
+        window.confirm(`LIVE RUN: ${msg} Continue?`)
+      );
+    }
+    if (!body) return Promise.resolve(false);
+
+    body.textContent = msg;
+    state.awaitingLiveConfirm = true;
+    if (modal.open) modal.close();
+
     return new Promise((resolve) => {
-      const modal = $('#liveConfirmModal');
-      const body = $('#liveConfirmBody');
-      const okBtn = $('#liveConfirmOk');
-      const cancelBtn = $('#liveConfirmCancel');
-      if (!modal || !body || !okBtn || !cancelBtn) {
-        resolve(false);
-        return;
+      liveConfirmResolve = resolve;
+      try {
+        modal.showModal();
+        $('#liveConfirmOk').focus();
+      } catch (err) {
+        liveConfirmResolve = null;
+        state.awaitingLiveConfirm = false;
+        resolve(window.confirm(`LIVE RUN: ${msg} Continue?`));
       }
-      body.textContent =
-        `auto-mate will submit ${entryCount} entries to the form on this page. This cannot be undone.`;
-      modal.classList.remove('hidden');
-      const onOk = () => cleanup(true);
-      const onCancel = () => cleanup(false);
-      function cleanup(ok) {
-        modal.classList.add('hidden');
-        okBtn.removeEventListener('click', onOk);
-        cancelBtn.removeEventListener('click', onCancel);
-        resolve(ok);
-      }
-      okBtn.addEventListener('click', onOk);
-      cancelBtn.addEventListener('click', onCancel);
     });
   }
 
   async function runSession() {
+    if (state.running || state.awaitingLiveConfirm) return;
     if (!state.recipe || !state.engineRows.length) return;
     const dryRun = $('#dryRun').checked;
     const fieldDelayMs = parseInt($('#fieldDelay').value, 10);
@@ -979,33 +1020,27 @@
   }
 
   function wireReportFilters() {
+    const reportPanel = document.querySelector('[data-panel="report"]');
+    if (!reportPanel) return;
     const onFilterClick = (e) => {
       const el = e.target.closest('[data-report-filter]');
-      if (!el || !$('#reportPreview').contains(el)) return;
+      if (!el || !reportPanel.contains(el)) return;
       e.preventDefault();
       const filter = el.getAttribute('data-report-filter');
       if (!filter || filter === state.reportFilter) return;
       state.reportFilter = filter;
       renderReport();
     };
-    const preview = $('#reportPreview');
-    if (!preview) return;
-    preview.removeEventListener('click', preview._reportFilterClick);
-    preview._reportFilterClick = onFilterClick;
-    preview.addEventListener('click', onFilterClick);
+    reportPanel.removeEventListener('click', reportPanel._reportFilterClick);
+    reportPanel._reportFilterClick = onFilterClick;
+    reportPanel.addEventListener('click', onFilterClick);
   }
 
   function renderReport() {
     if (!state.session) return;
     const s = REPORT.summarize(state.session);
     $('#reportSummary').innerHTML = renderReportSummaryHtml(s, state.reportFilter);
-    $('#reportBody').innerHTML = REPORT.toHTML(state.session, { filter: state.reportFilter })
-      .replace(/^[\s\S]*<body>/, '')
-      .replace(/<\/body>[\s\S]*$/, '');
-    $('#reportBody').querySelectorAll('.card-filter').forEach((card) => {
-      const f = card.getAttribute('data-report-filter');
-      card.classList.toggle('is-active', f === state.reportFilter);
-    });
+    $('#reportBody').innerHTML = REPORT.toBodyHtml(state.session, { filter: state.reportFilter });
     wireReportFilters();
   }
 
@@ -1064,6 +1099,31 @@
     if (img.complete && img.naturalWidth > 0) reveal();
   }
 
+  async function closeSidePanel() {
+    const tab = await getActiveTab();
+    const windowId = tab?.windowId;
+    const tabId = tab?.id;
+
+    try {
+      await chrome.runtime.sendMessage({
+        type: MSG.CLOSE_SIDE_PANEL,
+        windowId,
+        tabId
+      });
+    } catch (_) {}
+
+    try {
+      if (chrome.sidePanel && chrome.sidePanel.close) {
+        if (windowId != null) await chrome.sidePanel.close({ windowId });
+        else if (tabId != null) await chrome.sidePanel.close({ tabId });
+      }
+    } catch (_) {}
+
+    try {
+      window.close();
+    } catch (_) {}
+  }
+
   // ---- init ----
   (async function init() {
     const tagline = $('#tagline');
@@ -1071,6 +1131,12 @@
       tagline.textContent = window.FAA_randomQuote();
     }
     setRandomKanyePortrait();
+    setupLiveConfirmModal();
+    const closeBtn = $('#btnClosePanel');
+    if (closeBtn) closeBtn.addEventListener('click', (e) => {
+      e.preventDefault();
+      closeSidePanel();
+    });
     refreshDataStepNav();
     refreshLearnMappingVisibility();
     const stored = await chrome.storage.local.get(STORAGE_KEYS.RECIPE);

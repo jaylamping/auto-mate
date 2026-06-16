@@ -47,12 +47,12 @@
       .replace(/"/g, '&quot;');
   }
 
-  function toHTML(session, options = {}) {
-    const filter = options.filter || 'all';
-    const s = summarize(session);
+  function rowBlocksHtml(session, filter) {
     const visibleRows = filterRows(session.rows, filter);
-    const rowsHtml = visibleRows.length
-      ? visibleRows
+    if (!visibleRows.length) {
+      return `<p class="report-empty">No ${esc(filter)} rows in this session.</p>`;
+    }
+    return visibleRows
       .map((r) => {
         const actions = (r.result && r.result.actions) || [];
         const actionRows = actions
@@ -75,8 +75,25 @@
           <tbody>${actionRows}</tbody></table>
         </section>`;
       })
-      .join('')
-      : `<p class="report-empty">No ${esc(filter)} rows in this session.</p>`;
+      .join('');
+  }
+
+  /** HTML fragment for side panel preview (no duplicate summary cards). */
+  function toBodyHtml(session, options = {}) {
+    const filter = options.filter || 'all';
+    const s = summarize(session);
+    const filterBanner =
+      filter !== 'all'
+        ? `<div class="banner report-filter-banner">Showing <b>${filterRows(session.rows, filter).length}</b> of ${s.total} rows (${esc(filter)} only).</div>`
+        : '';
+    return filterBanner + rowBlocksHtml(session, filter);
+  }
+
+  function toHTML(session, options = {}) {
+    const filter = options.filter || 'all';
+    const s = summarize(session);
+    const visibleRows = filterRows(session.rows, filter);
+    const rowsHtml = rowBlocksHtml(session, filter);
 
   const filterBanner =
     filter !== 'all'
@@ -148,5 +165,5 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  root.FAA_REPORT = { summarize, rowStatus, filterRows, toHTML, toCSV, toJSON, download };
+  root.FAA_REPORT = { summarize, rowStatus, filterRows, toHTML, toBodyHtml, toCSV, toJSON, download };
 })(typeof window !== 'undefined' ? window : globalThis);

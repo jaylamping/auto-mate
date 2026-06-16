@@ -10,7 +10,14 @@
     <header class="border-b px-4 py-4">
       <div class="flex items-center justify-between gap-3">
         <h1 class="text-lg font-semibold tracking-tight">auto&#8209;mate</h1>
-        <img id="kanyePortrait" class="kanye-portrait" alt="" width="56" height="56" />
+        <div class="flex shrink-0 items-center gap-2">
+          <img id="kanyePortrait" class="kanye-portrait" alt="" width="56" height="56" />
+          <button type="button" id="btnClosePanel" class="panel-close-btn" aria-label="Close side panel" title="Close side panel">
+            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M18 6L6 18M6 6l12 12" />
+            </svg>
+          </button>
+        </div>
       </div>
     </header>
 
@@ -83,14 +90,14 @@
         <div id="runReadiness" class="text-sm min-h-[1.25rem]"></div>
         <label class="form-row cursor-pointer border rounded-lg">
           <input type="checkbox" id="dryRun" checked class="mt-0.5 rounded border-input" />
-          <span class="text-sm leading-snug"><strong>Dry run</strong> &mdash; fill everything but do <strong>not</strong> submit (recommended first)</span>
+          <span class="text-sm leading-snug"><strong>Dry run</strong> &mdash; test every row in provided extract WITHOUT submitting (recommended first)</span>
         </label>
         <label class="space-y-2 block">
           <div class="flex items-center justify-between text-sm">
             <span>Delay between fields</span>
-            <span class="text-muted-foreground"><span id="delayVal">250</span> ms</span>
+            <span class="text-muted-foreground"><span id="delayVal">200</span> ms</span>
           </div>
-          <input type="range" id="fieldDelay" min="0" max="1500" step="50" value="250" class="w-full accent-primary" />
+          <input type="range" id="fieldDelay" min="0" max="1500" step="50" value="200" class="w-full accent-primary" />
         </label>
         <div class="flex flex-wrap gap-2">
           <button type="button" id="btnRun" class="btn-primary">Start</button>
@@ -106,7 +113,7 @@
       <section class="panel" data-panel="report">
         <div id="reportSummary" class="alert-muted">No session yet.</div>
         <div class="flex flex-wrap gap-2">
-          <button type="button" id="btnExportHtml" class="btn-outline btn-sm">Export HTML</button>
+          <button type="button" id="btnExportHtml" class="btn-export-html">Export HTML</button>
           <button type="button" id="btnExportCsv" class="btn-outline btn-sm">Export CSV</button>
           <button type="button" id="btnExportJson" class="btn-outline btn-sm">Export JSON</button>
         </div>
@@ -128,6 +135,15 @@
     </footer>
 
     <div id="toast" class="toast hidden"></div>
+
+    <dialog id="liveConfirmModal" class="live-confirm-dialog" aria-labelledby="liveConfirmTitle">
+      <h2 id="liveConfirmTitle" class="text-lg font-semibold tracking-tight">Submit automatically?</h2>
+      <p id="liveConfirmBody" class="mt-2 text-sm text-muted-foreground leading-snug"></p>
+      <div class="mt-4 flex flex-wrap justify-end gap-2">
+        <button type="button" id="liveConfirmCancel" class="btn-outline">Cancel</button>
+        <button type="button" id="liveConfirmOk" class="btn-destructive">Yes, submit entries</button>
+      </div>
+    </dialog>
 
     <script>window.__FAA_CTX = 'panel';</script>
     <script src="chrome-shim.js"></script>

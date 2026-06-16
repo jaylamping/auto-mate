@@ -284,7 +284,9 @@
   function isProcedureSearchField(el) {
     if (!el) return false;
     const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
-    return /proc/.test(hay) && !/date|note/.test(hay);
+    if (/date|note|location|site|facility/.test(hay)) return false;
+    if (/proc_search|procedure\s*search/.test(hay.replace(/\s+/g, ' '))) return true;
+    return /\bproc\b/.test(hay) && /\bsearch\b/.test(hay);
   }
 
   function isProcedureAddClick(el) {
@@ -348,6 +350,7 @@
     if (!row) return false;
     const list = row.closest('ul, ol, [role="listbox"], .ac_results');
     const listHay = `${list && list.id || ''} ${list && list.className || ''} ${row.className || ''}`.toLowerCase();
+    if (/proc_result|proc_list|proc_row|procedure/.test(listHay)) return false;
     if (!/sup|supervisor|ac_result|ac_item|sup_result|ac_results/.test(listHay)) return false;
     return Boolean(findSupervisorSearchInput());
   }

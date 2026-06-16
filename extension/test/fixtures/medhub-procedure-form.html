@@ -129,10 +129,20 @@
           var sel = document.getElementById('selected_procedures');
           var chip = document.createElement('li');
           chip.className = 'proc_chip';
-          chip.textContent = li.dataset.value;
+          chip.innerHTML =
+            '<span class="proc_chip_label">' +
+            li.dataset.value +
+            '</span> <button type="button" class="remove" title="Remove procedure" aria-label="Remove procedure">×</button>';
           sel.appendChild(chip);
           procInput.value = '';
           procResults.style.display = 'none';
+        });
+
+        document.getElementById('selected_procedures').addEventListener('click', function (e) {
+          var btn = e.target.closest('button.remove, a.remove');
+          if (!btn) return;
+          var chip = btn.closest('li.proc_chip');
+          if (chip) chip.remove();
         });
 
         document.getElementById('submitBtn').addEventListener('click', function () {

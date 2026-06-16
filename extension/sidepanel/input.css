@@ -87,6 +87,12 @@
   .btn-sm {
     @apply h-8 rounded-md px-3 text-xs;
   }
+  .btn-export-html {
+    @apply btn btn-sm border border-zinc-300/80 bg-zinc-100 font-medium text-zinc-900 shadow-sm hover:bg-white hover:border-zinc-200;
+  }
+  .dark .btn-export-html {
+    @apply border-zinc-400/50 bg-zinc-100 text-zinc-900 hover:bg-white hover:border-zinc-300/70;
+  }
 
   /* shadcn Card */
   .card {
@@ -191,6 +197,13 @@
     @apply absolute right-1 top-1 flex h-10 w-10 items-center justify-center rounded-md text-3xl font-light leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground;
   }
 
+  .panel-close-btn {
+    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+  }
+  .panel-close-btn svg {
+    @apply block h-[18px] w-[18px] shrink-0;
+  }
+
   .map-field-flash .select {
     @apply border-emerald-500 text-emerald-400 transition-colors duration-300;
   }
@@ -288,11 +301,15 @@
   }
 
   /* Live-run confirmation */
-  .modal-overlay {
-    @apply fixed inset-0 z-[100] flex items-center justify-center bg-background/80 p-4 backdrop-blur-sm;
+  .live-confirm-dialog {
+    margin: auto;
+    max-width: 20rem;
+    border: 1px solid hsl(var(--border));
+    @apply w-full rounded-lg bg-card p-4 text-card-foreground shadow-lg;
   }
-  .modal-card {
-    @apply w-full max-w-sm rounded-lg border bg-card p-4 text-card-foreground shadow-lg;
+  .live-confirm-dialog::backdrop {
+    background: hsl(var(--background) / 0.88);
+    backdrop-filter: blur(4px);
   }
 
   /* Checkbox row */
@@ -302,29 +319,12 @@
 
   /* Session report preview (embedded HTML from report.js) */
   .report-preview {
-    @apply relative mt-2 rounded-md border border-border bg-card;
-    height: 11rem;
+    @apply relative mt-0 flex-1 rounded-md border border-border bg-card;
+    min-height: 28rem;
     overflow: auto;
-    transition: height 0.25s ease, box-shadow 0.25s ease;
-  }
-  .report-preview:hover,
-  .report-preview:focus-within {
-    height: 22rem;
-    @apply shadow-lg ring-1 ring-border z-20;
-  }
-  .report-preview-hint {
-    @apply sticky top-0 z-10 border-b border-border bg-muted/90 px-2 py-1 text-center text-[10px] text-muted-foreground;
-  }
-  .report-preview:hover .report-preview-hint,
-  .report-preview:focus-within .report-preview-hint {
-    @apply text-foreground;
   }
   .report-body {
-    @apply p-3 font-sans text-[11px] leading-relaxed text-foreground;
-  }
-  .report-preview:hover .report-body,
-  .report-preview:focus-within .report-body {
-    @apply text-xs;
+    @apply p-3 font-sans text-xs leading-relaxed text-foreground;
   }
   .report-body h1 {
     @apply m-0 mb-1 text-sm font-semibold;
@@ -336,7 +336,7 @@
     @apply mb-2 rounded-md border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px];
   }
   .report-body .cards {
-    @apply mb-3 flex flex-wrap gap-2;
+    @apply mb-3 flex flex-wrap gap-3;
   }
   .report-body .card {
     @apply min-w-[4.5rem] rounded-md border border-border bg-muted/40 px-3 py-2;
@@ -355,10 +355,10 @@
   }
 
   .report-summary-filters {
-    @apply flex flex-wrap items-center gap-1.5;
+    @apply flex flex-wrap items-center gap-3;
   }
   .report-filter {
-    @apply inline-flex items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
+    @apply inline-flex cursor-pointer items-center gap-1 rounded-md border border-border bg-muted/40 px-2 py-1 text-xs font-medium transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
   }
   .report-filter.is-active {
     @apply border-primary bg-primary/15 ring-1 ring-primary/40;
@@ -385,11 +385,7 @@
     @apply mb-2 text-xs font-medium;
   }
   .report-body table {
-    @apply w-full border-collapse text-[10px];
-  }
-  .report-preview:hover .report-body table,
-  .report-preview:focus-within .report-body table {
-    @apply text-[11px];
+    @apply w-full border-collapse text-xs;
   }
   .report-body th,
   .report-body td {
@@ -425,6 +421,9 @@
   }
   .panel.active {
     @apply block space-y-3;
+  }
+  .panel-report.active {
+    @apply flex min-h-[calc(100vh-13rem)] flex-col gap-3 space-y-0;
   }
   .panel-mapping.active {
     @apply space-y-2;

@@ -140,4 +140,19 @@ module.exports = async function run() {
     assert.strictEqual(document.getElementById('supChosen').value, 'Smith, John MD', 'supervisor still picked');
     console.log('  engine.medhub: notes INPUT on supervisor search is skipped at replay.');
   }
+
+  // ---- Second row should clear procedures from first row ----
+  {
+    const page = createPage('medhub-procedure-log.html');
+    const { document, ENGINE } = page;
+    const recipe = buildRecipe(page.MSG);
+    await ENGINE.runRow(recipe, row, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.strictEqual(document.querySelectorAll('#selectedProcs .selected_proc').length, 2, 'row1 adds two');
+    const row2 = { ...row, procedures: ['Ablation'] };
+    await ENGINE.runRow(recipe, row2, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    const selected = document.querySelectorAll('#selectedProcs .selected_proc');
+    assert.strictEqual(selected.length, 1, 'row2 should replace prior procedures');
+    assert.strictEqual(selected[0].children[1].textContent, 'Ablation');
+    console.log('  engine.medhub: clears selected procedures before each row.');
+  }
 };
