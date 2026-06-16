@@ -17,8 +17,6 @@
     HIGHLIGHT_FIELD: 'faa:highlight-field',
     SCAN_FORM: 'faa:scan-form',
     CLEAR_OVERLAY: 'faa:clear-overlay',
-    CLOSE_SIDE_PANEL: 'faa:close-side-panel',
-
     // Content -> side panel
     PONG: 'faa:pong',
     STEP_RECORDED: 'faa:step-recorded',

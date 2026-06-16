@@ -1252,30 +1252,6 @@
     if (img.complete && img.naturalWidth > 0) reveal();
   }
 
-  async function closeSidePanel() {
-    const tab = await getActiveTab();
-    const windowId = tab?.windowId;
-    const tabId = tab?.id;
-
-    try {
-      await chrome.runtime.sendMessage({
-        type: MSG.CLOSE_SIDE_PANEL,
-        windowId,
-        tabId
-      });
-    } catch (_) {}
-
-    try {
-      if (chrome.sidePanel && chrome.sidePanel.close) {
-        if (windowId != null) await chrome.sidePanel.close({ windowId });
-        else if (tabId != null) await chrome.sidePanel.close({ tabId });
-      }
-    } catch (_) {}
-
-    try {
-      window.close();
-    } catch (_) {}
-  }
 
   // ---- init ----
   (async function init() {
@@ -1285,11 +1261,6 @@
     }
     setRandomKanyePortrait();
     setupLiveConfirmModal();
-    const closeBtn = $('#btnClosePanel');
-    if (closeBtn) closeBtn.addEventListener('click', (e) => {
-      e.preventDefault();
-      closeSidePanel();
-    });
     refreshDataStepNav();
     refreshLearnMappingVisibility();
     const stored = await chrome.storage.local.get([

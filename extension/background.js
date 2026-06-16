@@ -3,7 +3,6 @@
  *
  * Responsibilities:
  *  - Open the side panel when the toolbar icon is clicked.
- *  - Close the side panel when the panel requests it (sidePanel.close from SW).
  *  - Relay messages from content scripts up to the side panel. (Side panel ->
  *    content goes directly via chrome.tabs.sendMessage from the panel.)
  */
@@ -28,37 +27,9 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
-async function closeExtensionSidePanel({ windowId, tabId } = {}) {
-  if (!chrome.sidePanel || !chrome.sidePanel.close) return false;
-
-  if (windowId != null) {
-    try {
-      await chrome.sidePanel.close({ windowId });
-      return true;
-    } catch (_) {}
-  }
-  if (tabId != null) {
-    try {
-      await chrome.sidePanel.close({ tabId });
-      return true;
-    } catch (_) {}
-  }
-  return false;
-}
-
 // Forward content-script-originated messages to the side panel runtime.
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+chrome.runtime.onMessage.addListener((message, sender) => {
   if (!message || !message.type) return;
-
-  if (message.type === MSG.CLOSE_SIDE_PANEL) {
-    closeExtensionSidePanel({
-      windowId: message.windowId,
-      tabId: message.tabId
-    })
-      .then((ok) => sendResponse({ ok }))
-      .catch(() => sendResponse({ ok: false }));
-    return true;
-  }
 
   const fromContent = !!(sender && sender.tab);
   if (fromContent) {

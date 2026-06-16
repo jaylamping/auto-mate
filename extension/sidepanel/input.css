@@ -197,13 +197,6 @@
     @apply absolute right-1 top-1 flex h-10 w-10 items-center justify-center rounded-md text-3xl font-light leading-none text-muted-foreground transition-colors hover:bg-accent hover:text-foreground;
   }
 
-  .panel-close-btn {
-    @apply inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border-0 bg-transparent p-0 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring;
-  }
-  .panel-close-btn svg {
-    @apply block h-[18px] w-[18px] shrink-0;
-  }
-
   .map-field-flash .select {
     @apply border-emerald-500 text-emerald-400 transition-colors duration-300;
   }
