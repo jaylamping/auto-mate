@@ -50,7 +50,11 @@
           <a href="#" id="supTabOther" class="tab">Other</a>
         </div>
         <div id="supListPane">
-          <select id="supSelect"><option value="">(none)</option></select>
+          <select id="supSelect">
+            <option value="">(none)</option>
+            <option value="smith_john">Smith, John MD</option>
+            <option value="smithson_karen">Smithson, Karen MD</option>
+          </select>
         </div>
         <div id="supSearchPane" style="display:none">
           <input type="text" id="supSearch" aria-label="Supervisor search" autocomplete="off" />
@@ -81,6 +85,7 @@
           <li class="proc_row" data-name="Cardioversion"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Cardioversion</span></li>
           <li class="proc_row" data-name="Colonoscopy"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Colonoscopy</span></li>
           <li class="proc_row" data-name="Biopsy"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Biopsy</span></li>
+          <li class="proc_row" data-name="Biopsy w/ scalpel"><a href="#" class="add">+</a><span class="cpt">--</span><span class="name">Biopsy w/ scalpel</span></li>
         </ul>
         <button type="button" id="addCustom">+ Add Custom Procedure Type</button>
       </div>
@@ -102,6 +107,10 @@
           'Diaz Sierra, Alejandra MD'
         ];
 
+        function normKey(s) {
+          return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+        }
+
         // Supervisor tabs
         var listPane = document.getElementById('supListPane');
         var searchPane = document.getElementById('supSearchPane');
@@ -116,13 +125,18 @@
           listPane.style.display = 'block';
         });
 
+        document.getElementById('supSelect').addEventListener('change', function () {
+          var opt = this.options[this.selectedIndex];
+          document.getElementById('supChosen').value = (opt && opt.text) ? opt.text.trim() : '';
+        });
+
         var supSearch = document.getElementById('supSearch');
         var supResults = document.getElementById('supResults');
         supSearch.addEventListener('input', function () {
-          var q = supSearch.value.trim().toLowerCase();
           supResults.innerHTML = '';
-          if (!q) { supResults.style.display = 'none'; return; }
-          var matches = SUPERVISORS.filter(function (n) { return n.toLowerCase().indexOf(q) !== -1; });
+          var qk = normKey(supSearch.value);
+          if (!qk) { supResults.style.display = 'none'; return; }
+          var matches = SUPERVISORS.filter(function (n) { return normKey(n).indexOf(qk) !== -1; });
           if (!matches.length) { supResults.style.display = 'none'; return; }
           matches.forEach(function (n) {
             var li = document.createElement('li');
@@ -145,10 +159,10 @@
         var procSearch = document.getElementById('procSearch');
         var rows = Array.prototype.slice.call(document.querySelectorAll('#procList .proc_row'));
         procSearch.addEventListener('input', function () {
-          var q = procSearch.value.trim().toLowerCase();
+          var qk = normKey(procSearch.value);
           rows.forEach(function (r) {
-            var name = (r.getAttribute('data-name') || '').toLowerCase();
-            r.style.display = !q || name.indexOf(q) !== -1 ? '' : 'none';
+            var name = normKey(r.getAttribute('data-name') || '');
+            r.style.display = !qk || name.indexOf(qk) !== -1 ? '' : 'none';
           });
         });
         document.getElementById('procList').addEventListener('click', function (e) {

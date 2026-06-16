@@ -7,11 +7,12 @@
  */
 (function (root) {
   const DOM = root.FAA_DOM;
-  const { ROLE, FIELD } = root.FAA_MSG;
+  const { ROLE, FIELD, normalizeMatchKey } = root.FAA_MSG;
 
   let abortFlag = false;
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+  const DEFAULT_TYPE_CHAR_MS = 50;
 
   function abort() {
     abortFlag = true;
@@ -51,7 +52,12 @@
     }
   }
 
-  async function typeInto(el, value) {
+  async function typeInto(el, value, opts = {}) {
+    const charDelayMs = opts.charDelayMs != null ? opts.charDelayMs : 0;
+    if (charDelayMs > 0) {
+      await typeChars(el, String(value), charDelayMs);
+      return;
+    }
     el.focus();
     if (el.isContentEditable) {
       el.textContent = '';
@@ -65,26 +71,214 @@
     fireKeystrokes(el);
   }
 
+  /** Type one character at a time so autocompletes can filter incrementally. */
+  async function typeChars(el, value, charDelayMs = DEFAULT_TYPE_CHAR_MS) {
+    const str = String(value);
+    el.focus();
+    if (el.isContentEditable) {
+      el.textContent = '';
+    } else {
+      setNativeValue(el, '');
+    }
+    fireInput(el);
+    for (let i = 0; i < str.length; i++) {
+      const partial = str.slice(0, i + 1);
+      if (el.isContentEditable) {
+        el.textContent = partial;
+      } else {
+        setNativeValue(el, partial);
+      }
+      fireInput(el);
+      fireKeystrokes(el);
+      if (i < str.length - 1 && charDelayMs > 0) {
+        await sleep(charDelayMs);
+      }
+    }
+  }
+
   function scoreOption(text, query) {
-    const t = (text || '').trim().toLowerCase();
-    const q = (query || '').trim().toLowerCase();
+    const t = normalizeMatchKey(text);
+    const q = normalizeMatchKey(query);
     if (!t || !q) return 0;
     if (t === q) return 100;
     if (t.startsWith(q)) return 80;
+    if (q.startsWith(t)) return 75;
     if (t.includes(q)) return 60;
-    // token overlap
-    const qt = q.split(/\s+/);
+    if (q.includes(t)) return 55;
+    const qt = String(query)
+      .toLowerCase()
+      .split(/[^a-z0-9]+/)
+      .filter((w) => w.length > 0);
+    if (!qt.length) return 0;
     const hits = qt.filter((w) => t.includes(w)).length;
     return Math.round((hits / qt.length) * 40);
   }
 
+  /** Canonical option label — avoids scoring "+ CPT noise" in MedHub procedure rows. */
+  function extractOptionLabel(optionEl) {
+    if (!optionEl) return '';
+    const dataName = optionEl.getAttribute && optionEl.getAttribute('data-name');
+    if (dataName && String(dataName).trim()) return String(dataName).trim();
+    const nameEl = optionEl.querySelector && optionEl.querySelector('.name');
+    if (nameEl && nameEl.textContent.trim()) return nameEl.textContent.trim();
+    if (optionEl.dataset && optionEl.dataset.value) return String(optionEl.dataset.value).trim();
+    return (optionEl.textContent || '').trim();
+  }
+
+  function supervisorNamesMatch(label, query) {
+    const a = normalizeMatchKey(label);
+    const b = normalizeMatchKey(query);
+    if (!a || !b) return false;
+    if (a === b) return true;
+    const stripMd = (k) => (k.length > 2 && k.endsWith('md') ? k.slice(0, -2) : k);
+    return stripMd(a) === stripMd(b);
+  }
+
+  function findSupervisorListSelect() {
+    const byId = document.getElementById('supSelect');
+    if (byId && DOM.isVisible(byId)) return byId;
+    const pane = document.getElementById('supListPane');
+    if (pane) {
+      const sel = pane.querySelector('select');
+      if (sel && DOM.isVisible(sel)) return sel;
+    }
+    return null;
+  }
+
+  function trySelectSupervisorFromList(selectEl, query) {
+    for (const opt of selectEl.options) {
+      const label = (opt.textContent || '').trim();
+      const val = (opt.value || '').trim();
+      if (!label && !val) continue;
+      if (supervisorNamesMatch(label, query) || supervisorNamesMatch(val, query)) {
+        setNativeValue(selectEl, opt.value);
+        fireInput(selectEl);
+        const hidden = document.getElementById('supChosen');
+        if (hidden) setNativeValue(hidden, label || val);
+        fireInput(hidden);
+        return label || val;
+      }
+    }
+    return null;
+  }
+
+  function findSupervisorSearchTab() {
+    const byId = document.getElementById('supTabSearch');
+    if (byId) return byId;
+    const tabs = document.querySelector('.sup-tabs');
+    if (!tabs) return null;
+    for (const link of tabs.querySelectorAll('a, button, [role="tab"]')) {
+      if (normalizeMatchKey(link.textContent) === 'search') return link;
+    }
+    return null;
+  }
+
+  function visibleSupervisorOptions(optionSelector) {
+    return Array.from(document.querySelectorAll(optionSelector || 'li.sup_result'))
+      .filter((o) => DOM.isVisible(o) && extractOptionLabel(o).length > 0);
+  }
+
+  async function selectSupervisorFromSearch(inputEl, optionSelector, query, opts = {}) {
+    const searchTab = findSupervisorSearchTab();
+    if (searchTab) {
+      searchTab.click();
+      await sleep(40);
+    }
+
+    const q = String(query).trim();
+    if (!q) throw new Error('Empty supervisor value');
+
+    const timeout = opts.autocompleteTimeoutMs != null ? opts.autocompleteTimeoutMs : 9000;
+    const charDelayMs = opts.typeCharDelayMs != null ? opts.typeCharDelayMs : DEFAULT_TYPE_CHAR_MS;
+    const quickWaitMs = Math.max(charDelayMs + 60, 100);
+
+    inputEl.focus();
+    if (inputEl.isContentEditable) {
+      inputEl.textContent = '';
+    } else {
+      setNativeValue(inputEl, '');
+    }
+    fireInput(inputEl);
+
+    for (let len = 1; len <= q.length; len++) {
+      const partial = q.slice(0, len);
+      if (inputEl.isContentEditable) {
+        inputEl.textContent = partial;
+      } else {
+        setNativeValue(inputEl, partial);
+      }
+      fireInput(inputEl);
+      fireKeystrokes(inputEl);
+
+      await waitFor(() => visibleSupervisorOptions(optionSelector).length > 0, {
+        timeout: len < q.length ? quickWaitMs : timeout,
+        interval: 25
+      });
+      const visible = visibleSupervisorOptions(optionSelector);
+
+      if (visible.length === 1) {
+        const chosen = extractOptionLabel(visible[0]);
+        visible[0].click();
+        await sleep(50);
+        return chosen;
+      }
+      if (visible.length === 0 && len < q.length) {
+        if (charDelayMs > 0) await sleep(charDelayMs);
+        continue;
+      }
+      if (visible.length > 1 && len < q.length) {
+        if (charDelayMs > 0) await sleep(charDelayMs);
+        continue;
+      }
+
+      if (visible.length === 0) {
+        throw new Error(`No autocomplete results for "${query}"`);
+      }
+      const exact = visible.find((o) => supervisorNamesMatch(extractOptionLabel(o), query));
+      if (exact) {
+        const chosen = extractOptionLabel(exact);
+        exact.click();
+        await sleep(50);
+        return chosen;
+      }
+      throw new Error(`Multiple supervisor matches for "${query}" (${visible.length} results)`);
+    }
+
+    throw new Error(`Could not resolve supervisor "${query}"`);
+  }
+
+  async function selectSupervisor(query, step, opts = {}) {
+    const listSelect = findSupervisorListSelect();
+    if (listSelect) {
+      const fromList = trySelectSupervisorFromList(listSelect, query);
+      if (fromList) return fromList;
+    }
+
+    let inputEl = DOM.resolveElement(step.candidates) || document.getElementById('supSearch');
+    if (!inputEl) throw new Error('Supervisor search input not found');
+
+    return selectSupervisorFromSearch(inputEl, step.optionSelector, query, opts);
+  }
+
+  function isSkippableSupervisorNavClick(step) {
+    if (step.role !== ROLE.CLICK) return false;
+    if ((step.candidates || []).some((c) => /supTabSearch/i.test(String(c.value || '')))) return true;
+    const el = DOM.resolveElement(step.candidates);
+    if (!el) return false;
+    const id = (el.id || '').toLowerCase();
+    if (id === 'suptabsearch') return true;
+    if (normalizeMatchKey(el.textContent) === 'search' && el.closest('.sup-tabs')) return true;
+    return false;
+  }
+
   async function selectFromAutocomplete(inputEl, optionSelector, query, opts = {}) {
     const timeout = opts.autocompleteTimeoutMs != null ? opts.autocompleteTimeoutMs : 9000;
-    await typeInto(inputEl, query);
+    const charDelayMs = opts.typeCharDelayMs != null ? opts.typeCharDelayMs : 0;
+    await typeInto(inputEl, query, { charDelayMs });
     const options = await waitFor(
       () => {
         const list = Array.from(document.querySelectorAll(optionSelector || '[role="option"]'))
-          .filter((o) => DOM.isVisible(o) && (o.textContent || '').trim().length > 0);
+          .filter((o) => DOM.isVisible(o) && extractOptionLabel(o).length > 0);
         return list.length ? list : null;
       },
       { timeout }
@@ -94,17 +288,22 @@
     }
     let best = null;
     let bestScore = -1;
+    let bestLabelLen = Infinity;
     for (const o of options) {
-      const s = scoreOption(o.textContent, query);
-      if (s > bestScore) {
+      const label = extractOptionLabel(o);
+      const s = scoreOption(label, query);
+      // Same score → shorter label wins (Biopsy beats Biopsy w/ scalpel on substring ties).
+      if (s > bestScore || (s === bestScore && s > 0 && label.length < bestLabelLen)) {
         bestScore = s;
         best = o;
+        bestLabelLen = label.length;
       }
     }
     if (!best || bestScore < 40) {
-      throw new Error(`No good match for "${query}" (best option: "${best ? best.textContent.trim().slice(0, 60) : 'none'}")`);
+      const hint = best ? extractOptionLabel(best) : 'none';
+      throw new Error(`No good match for "${query}" (best option: "${String(hint).slice(0, 60)}")`);
     }
-    const chosenText = best.textContent.trim();
+    const chosenText = extractOptionLabel(best);
     // Some forms (e.g. MedHub's procedure list) require clicking a control
     // *inside* the matched row (a "+" add link) rather than the row text. If a
     // relative click target was recorded, use it; otherwise click the match.
@@ -133,8 +332,19 @@
         return row.location || 'IMC';
       case FIELD.SUPERVISOR:
         return row.supervisor;
-      case FIELD.MRN:
+      case FIELD.ENCOUNTER:
+      case 'mrn':
         return row.mrn;
+      case FIELD.GENDER:
+        return row.gender;
+      case FIELD.AGE:
+        return row.age;
+      case FIELD.DIAGNOSIS:
+        return row.diagnosis;
+      case FIELD.COMPLICATIONS:
+        return row.complications;
+      case FIELD.NOTES:
+        return row.notes;
       default:
         return undefined;
     }
@@ -149,8 +359,11 @@
    */
   async function runRow(recipe, row, opts = {}) {
     resetAbort();
-    const { dryRun = false, onAction = () => {}, fieldDelayMs = 250, autocompleteTimeoutMs } = opts;
-    const acOpts = { autocompleteTimeoutMs };
+    const { dryRun = false, onAction = () => {}, fieldDelayMs = 250, autocompleteTimeoutMs, typeCharDelayMs } = opts;
+    const acOpts = {
+      autocompleteTimeoutMs,
+      typeCharDelayMs: typeCharDelayMs != null ? typeCharDelayMs : DEFAULT_TYPE_CHAR_MS
+    };
     const actions = [];
 
     const record = (entry) => {
@@ -168,18 +381,31 @@
       try {
         const el = await waitFor(() => {
           const found = DOM.resolveElement(step.candidates);
-          return found && DOM.isVisible(found) ? found : null;
+          if (!found) return null;
+          if (step.role === ROLE.AUTOCOMPLETE && step.field === FIELD.SUPERVISOR) return found;
+          return DOM.isVisible(found) ? found : null;
         });
-        if (!el && step.role !== ROLE.SUBMIT) {
+        const needsVisibleEl =
+          step.role !== ROLE.SUBMIT &&
+          !isSkippableSupervisorNavClick(step) &&
+          !(step.role === ROLE.AUTOCOMPLETE && step.field === FIELD.SUPERVISOR);
+        if (!el && needsVisibleEl) {
           record({ field: step.field, role: step.role, outcome: 'failed', detail: 'Field not found on page' });
           return { ok: false, actions, failedField: step.field };
         }
 
         if (step.role === ROLE.CLICK) {
-          // Navigation / UI click recorded during Learn (e.g. a tab switch).
-          // No spreadsheet value; just reproduce the click in order.
-          el.click();
-          record({ field: step.field, role: step.role, outcome: 'success', detail: 'clicked' });
+          if (isSkippableSupervisorNavClick(step)) {
+            record({
+              field: step.field,
+              role: step.role,
+              outcome: 'skipped',
+              detail: 'Supervisor Search tab — picker handles List/Search'
+            });
+          } else {
+            el.click();
+            record({ field: step.field, role: step.role, outcome: 'success', detail: 'clicked' });
+          }
         } else if (step.role === ROLE.STATIC) {
           const v = step.staticValue != null ? step.staticValue : valueForField(step.field, row);
           if (el.tagName.toLowerCase() === 'select') {
@@ -205,6 +431,10 @@
           if (step.field === FIELD.PROCEDURE && Array.isArray(row.procedures)) {
             for (const proc of row.procedures) {
               if (abortFlag) break;
+              if (!proc || String(proc).trim() === '') {
+                record({ field: step.field, role: step.role, outcome: 'skipped', detail: 'No value in row' });
+                continue;
+              }
               const inputEl = await waitFor(() => {
                 const f = DOM.resolveElement(step.candidates);
                 return f && DOM.isVisible(f) ? f : null;
@@ -224,8 +454,15 @@
             }
           } else {
             const v = valueForField(step.field, row);
-            const chosen = await selectFromAutocomplete(el, step.optionSelector, v, { ...acOpts, clickRel: step.clickRel });
-            record({ field: step.field, role: step.role, value: v, chosen, outcome: 'success' });
+            if (v == null || v === '') {
+              record({ field: step.field, role: step.role, outcome: 'skipped', detail: 'No value in row' });
+            } else if (step.field === FIELD.SUPERVISOR) {
+              const chosen = await selectSupervisor(v, step, acOpts);
+              record({ field: step.field, role: step.role, value: v, chosen, outcome: 'success' });
+            } else {
+              const chosen = await selectFromAutocomplete(el, step.optionSelector, v, { ...acOpts, clickRel: step.clickRel });
+              record({ field: step.field, role: step.role, value: v, chosen, outcome: 'success' });
+            }
           }
         } else if (step.role === ROLE.SUBMIT) {
           if (dryRun) {

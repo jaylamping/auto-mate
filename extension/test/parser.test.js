@@ -19,6 +19,24 @@ require('../sidepanel/report.js');
 
 const PARSER = root.FAA_PARSER;
 const REPORT = root.FAA_REPORT;
+const { normalizeMatchKey } = root.FAA_MSG;
+
+assert.strictEqual(normalizeMatchKey('Smith, John MD'), 'smithjohnmd');
+assert.strictEqual(normalizeMatchKey('Smith John'), 'smithjohn');
+assert.strictEqual(root.FAA_MSG.valueMatchesCell('Screening assessment', 'ass'), false);
+assert.strictEqual(root.FAA_MSG.valueMatchesCell('Screening assessment', 'assessment'), true);
+assert.strictEqual(root.FAA_MSG.valueMatchesCell('F', 'F'), true);
+
+assert.strictEqual(
+  root.FAA_MSG.pickPreferredColumnMatch(['Provider Notes', 'Patient Name'], 'Provider Notes'),
+  'Patient Name',
+  'name in header beats notes when both match'
+);
+assert.strictEqual(
+  root.FAA_MSG.pickPreferredColumnMatch(['Attending Provider', 'Procedure Name'], 'Attending Provider'),
+  'Procedure Name',
+  'name in header beats provider when both match'
+);
 
 // --- Build an in-memory workbook from the sample CSV ---
 const csv = fs.readFileSync(path.join(__dirname, '../samples/slicer-dicer-sample.csv'), 'utf8');
@@ -36,23 +54,21 @@ async function run() {
   const mapping = PARSER.guessMapping(parsed.headers);
   assert.strictEqual(mapping.date, 'Date of Service');
   assert.strictEqual(mapping.supervisor, 'Attending Provider');
-  assert.strictEqual(mapping.mrn, 'Patient MRN');
+  assert.strictEqual(mapping.encounter, 'Patient MRN');
+  assert.strictEqual(PARSER.matchFieldKeyFromLabel('Patient MRN', parsed.headers), 'encounter');
+  assert.strictEqual(PARSER.matchFieldKeyFromLabel('Date of Service', parsed.headers), 'date');
   assert.strictEqual(mapping.procedure, 'Procedure Name');
 
-  const grouped = PARSER.buildEngineRows(parsed, mapping, { groupProcedures: true, location: 'IMC' });
-  // Rows 1+2 share MRN/date/supervisor -> merged into one with 2 procedures.
-  assert.strictEqual(grouped.length, 3, 'grouped entries');
-  const first = grouped[0];
-  assert.deepStrictEqual(first.procedures, ['Colonoscopy', 'Polypectomy']);
-  assert.strictEqual(first.location, 'IMC');
-  assert.strictEqual(first.mrn, '000123456');
+  const rows = PARSER.buildEngineRows(parsed, mapping, { location: 'IMC' });
+  assert.strictEqual(rows.length, 4, 'one engine row per spreadsheet row');
+  assert.deepStrictEqual(rows[0].procedures, ['Colonoscopy']);
+  assert.strictEqual(rows[0].location, 'IMC');
+  assert.strictEqual(rows[0].mrn, '000123456');
+  assert.deepStrictEqual(rows[1].procedures, ['Polypectomy']);
 
-  // Delimited cell expands into multiple procedures.
-  const last = grouped[2];
+  // Delimited cell expands into multiple procedures on that row.
+  const last = rows[3];
   assert.deepStrictEqual(last.procedures, ['Colonoscopy', 'Biopsy']);
-
-  const ungrouped = PARSER.buildEngineRows(parsed, mapping, { groupProcedures: false });
-  assert.strictEqual(ungrouped.length, 4, 'ungrouped keeps 4 rows');
 
   // --- Report builder ---
   const session = {
@@ -69,6 +85,9 @@ async function run() {
   assert.strictEqual(sum.succeeded, 1);
   assert.strictEqual(sum.failed, 1);
   assert.ok(REPORT.toHTML(session).includes('auto-mate session report'));
+  assert.ok(REPORT.toHTML(session, { filter: 'failed' }).includes('Row 2'));
+  assert.ok(!REPORT.toHTML(session, { filter: 'success' }).includes('Row 2'));
+  assert.strictEqual(REPORT.filterRows(session.rows, 'failed').length, 1);
   assert.ok(REPORT.toCSV(session).split('\r\n').length >= 3);
   assert.ok(JSON.parse(REPORT.toJSON(session)).summary.total === 2);
 

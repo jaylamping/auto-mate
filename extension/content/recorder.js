@@ -9,16 +9,41 @@
  */
 (function (root) {
   const DOM = root.FAA_DOM;
-  const { ROLE } = root.FAA_MSG;
+  const { ROLE, minMappingLenFromHaystack } = root.FAA_MSG;
 
   let active = false;
   let onStep = null;
+  let onLiveInput = null;
   let stepSeq = 0;
+  let liveInputTimer = null;
+  const LIVE_INPUT_MS = 300;
 
   // Tracks the most recent typing into a text-like field, so a subsequent
   // click on a popup option can be recognized as an autocomplete selection.
   let pendingType = null; // { el, value, candidates, ts, stepId }
   const AUTOCOMPLETE_WINDOW_MS = 8000;
+  let fieldInteracted = new WeakMap();
+  let fieldFocusValue = new WeakMap();
+
+  function markFieldInteracted(el) {
+    if (el && el.nodeType === 1) fieldInteracted.set(el, true);
+  }
+
+  function wasFieldInteracted(el) {
+    return el && fieldInteracted.get(el) === true;
+  }
+
+  function rememberFocusValue(el) {
+    if (!el || el.nodeType !== 1) return;
+    fieldFocusValue.set(el, fieldValue(el));
+  }
+
+  function valueChangedSinceFocus(el) {
+    if (!el) return false;
+    const baseline = fieldFocusValue.get(el);
+    if (baseline === undefined) return false;
+    return fieldValue(el) !== baseline;
+  }
 
   function isTextEntry(el) {
     if (!el || el.nodeType !== 1) return false;
@@ -92,10 +117,14 @@
   }
 
   function fieldText(el) {
+    const dom = root.FAA_DOM;
+    if (dom && typeof dom.accessibleNameFor === 'function') {
+      return (dom.accessibleNameFor(el) || '').trim();
+    }
     return (
       el.getAttribute('aria-label') ||
       el.getAttribute('placeholder') ||
-      (DOM.labelTextFor(el) || '') ||
+      (dom && dom.labelTextFor ? dom.labelTextFor(el) || '' : '') ||
       (el.name || '') ||
       ''
     ).trim();
@@ -152,13 +181,17 @@
 
   function handleFocusIn(e) {
     if (!active) return;
-    // No-op: focus alone isn't a step, but we use it to scope context.
+    const el = e.target;
+    const tag = el.tagName.toLowerCase();
+    if (!isTextEntry(el) && tag !== 'select') return;
+    rememberFocusValue(el);
   }
 
   function handleInput(e) {
     if (!active) return;
     const el = e.target;
     if (!isTextEntry(el)) return;
+    markFieldInteracted(el);
     // If typing has moved to a different field without an intervening click
     // (e.g. tabbing between inputs), flush the previous field as a plain input
     // so it is not lost. Same-element keystrokes just update the pending value.
@@ -175,24 +208,186 @@
       stepId: null,
       emitted: false
     };
+    if (onLiveInput) {
+      clearTimeout(liveInputTimer);
+      liveInputTimer = setTimeout(() => {
+        if (!pendingType || pendingType.el !== el) return;
+        const val = String(pendingType.value || '').trim();
+        if (val.length < minLiveValueLen(el)) return;
+        emitLiveFieldState(el, { debounced: true });
+      }, LIVE_INPUT_MS);
+    }
+  }
+
+  function fieldValue(el) {
+    if (!el) return '';
+    return String(el.isContentEditable ? el.textContent : el.value).trim();
+  }
+
+  function minLiveValueLen(el) {
+    return minMappingLenFromHaystack(fieldText(el));
+  }
+
+  function emitLiveFieldState(el, opts = {}) {
+    if (!onLiveInput || !el || el.nodeType !== 1) return;
+    if (!wasFieldInteracted(el)) return;
+    if (opts.blurred && !valueChangedSinceFocus(el)) return;
+    const tag = el.tagName.toLowerCase();
+    const value = fieldValue(el);
+    const minLen = tag === 'select' ? 1 : minLiveValueLen(el);
+    if (value.length < minLen) return;
+    onLiveInput({
+      role: ROLE.INPUT,
+      candidates: DOM.generateCandidateSelectors(el),
+      sampleValue: value,
+      text: fieldText(el),
+      tag,
+      blurred: Boolean(opts.blurred),
+      debounced: Boolean(opts.debounced)
+    });
+  }
+
+  function handleBlur(e) {
+    if (!active) return;
+    const el = e.target;
+    const tag = el.tagName.toLowerCase();
+    if (!isTextEntry(el) && tag !== 'select') return;
+
+    clearTimeout(liveInputTimer);
+    liveInputTimer = null;
+
+    if (pendingType && pendingType.el === el) {
+      pendingType.value = el.isContentEditable ? el.textContent : el.value;
+    }
+
+    emitLiveFieldState(el, { blurred: true });
   }
 
   function flushPendingTypeAsInput() {
-    if (pendingType && !pendingType.emitted) {
-      emit({
+    if (!pendingType || pendingType.emitted || !wasFieldInteracted(pendingType.el)) return;
+    if (!valueChangedSinceFocus(pendingType.el)) return;
+    emit({
         role: ROLE.INPUT,
         candidates: pendingType.candidates,
         sampleValue: pendingType.value,
         text: pendingType.text,
         tag: pendingType.el.tagName.toLowerCase()
-      });
+    });
+    pendingType.emitted = true;
+  }
+
+  function isProcedureSearchField(el) {
+    if (!el) return false;
+    const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
+    return /proc/.test(hay) && !/date|note/.test(hay);
+  }
+
+  function isProcedureAddClick(el) {
+    const add = el.closest && el.closest('a.add, button.add');
+    if (!add) return false;
+    const row = add.closest('.proc_row, [data-name]');
+    return !!row;
+  }
+
+  function emitProcedureAddStep(el) {
+    const add = el.closest('a.add, button.add') || el;
+    const row = add.closest('.proc_row, li[data-name], li');
+    const container = row || add;
+    const { optionSelector, candidates, container: optContainer } = optionContainerSelector(container);
+    const procPending = pendingType && isProcedureSearchField(pendingType.el) ? pendingType : null;
+    const procInput =
+      procPending?.el ||
+      document.querySelector(
+        '#procSearch, #proc_search, [aria-label*="Procedure" i], [name*="procedure" i][type="text"]'
+      );
+    const inputCandidates = procPending
+      ? procPending.candidates
+      : procInput
+        ? DOM.generateCandidateSelectors(procInput)
+        : [];
+    const sampleVal = procPending ? procPending.value : procInput ? procInput.value : '';
+    const label = procPending ? procPending.text : procInput ? fieldText(procInput) : 'Procedure';
+    const relRoot = optContainer || container;
+    emit({
+      role: ROLE.AUTOCOMPLETE,
+      candidates: inputCandidates,
+      optionSelector,
+      optionCandidates: candidates,
+      clickRel: relSelector(relRoot, add),
+      sampleValue: sampleVal,
+      sampleOptionText: (row?.getAttribute('data-name') || relRoot.textContent || '').trim().slice(0, 120),
+      text: label,
+      tag: 'input'
+    });
+  }
+
+  function isSupervisorSearchInput(el) {
+    if (!el) return false;
+    const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
+    return /supervis|attending|precept/.test(hay);
+  }
+
+  function findSupervisorSearchInput() {
+    const byId = document.getElementById('supSearch') || document.getElementById('sup_search');
+    if (byId && isTextEntry(byId)) return byId;
+    const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])');
+    for (const el of nodes) {
+      if (isTextEntry(el) && isSupervisorSearchInput(el)) return el;
+    }
+    return null;
+  }
+
+  function isSupervisorResultClick(el) {
+    if (!el) return false;
+    const row = el.closest && el.closest('li, [role="option"], tr');
+    if (!row) return false;
+    const list = row.closest('ul, ol, [role="listbox"], .ac_results');
+    const listHay = `${list && list.id || ''} ${list && list.className || ''} ${row.className || ''}`.toLowerCase();
+    if (!/sup|supervisor|ac_result|ac_item|sup_result|ac_results/.test(listHay)) return false;
+    return Boolean(findSupervisorSearchInput());
+  }
+
+  function emitSupervisorAutocompleteStep(el) {
+    const row = el.closest('li, [role="option"], tr') || el;
+    const input = findSupervisorSearchInput();
+    if (!input) return;
+    markFieldInteracted(input);
+    const { optionSelector, candidates, container } = optionContainerSelector(row);
+    const sampleOptionText = String(
+      (row.dataset && row.dataset.value) || row.textContent || ''
+    ).trim().slice(0, 120);
+    emit({
+      role: ROLE.AUTOCOMPLETE,
+      candidates: DOM.generateCandidateSelectors(input),
+      optionSelector,
+      optionCandidates: candidates,
+      clickRel: relSelector(container, el),
+      sampleValue: input.value || (pendingType && pendingType.el === input ? pendingType.value : ''),
+      sampleOptionText,
+      text: fieldText(input),
+      tag: input.tagName.toLowerCase()
+    });
+    if (pendingType && pendingType.el === input) {
       pendingType.emitted = true;
+      pendingType = null;
     }
   }
 
   function handleClick(e) {
     if (!active) return;
     const el = e.target.closest('a,button,[role="button"],[role="option"],li,div,span,input,select,td') || e.target;
+
+    // MedHub procedure "+" add — always an autocomplete pick, even without typing first.
+    if (isProcedureAddClick(el)) {
+      emitProcedureAddStep(el);
+      pendingType = null;
+      return;
+    }
+
+    if (isSupervisorResultClick(el)) {
+      emitSupervisorAutocompleteStep(el);
+      return;
+    }
 
     // Autocomplete detection: a recent type, and this click is on a different
     // element that looks like a results option.
@@ -203,6 +398,7 @@
       !pendingType.el.contains(el) &&
       isOptionLike(el)
     ) {
+      markFieldInteracted(pendingType.el);
       const { optionSelector, candidates, container } = optionContainerSelector(el);
       emit({
         role: ROLE.AUTOCOMPLETE,
@@ -245,6 +441,7 @@
     if (!active) return;
     const el = e.target;
     if (el.tagName.toLowerCase() === 'select') {
+      markFieldInteracted(el);
       emit({
         role: ROLE.INPUT,
         candidates: DOM.generateCandidateSelectors(el),
@@ -255,15 +452,27 @@
     }
   }
 
-  function start(cb) {
+  function handlePaste(e) {
+    if (!active) return;
+    const el = e.target;
+    if (isTextEntry(el)) markFieldInteracted(el);
+  }
+
+  function start(cb, liveCb) {
     if (active) return;
     active = true;
     onStep = cb;
+    onLiveInput = liveCb || null;
     stepSeq = 0;
     pendingType = null;
+    liveInputTimer = null;
+    fieldInteracted = new WeakMap();
+    fieldFocusValue = new WeakMap();
     document.addEventListener('focusin', handleFocusIn, true);
     document.addEventListener('input', handleInput, true);
+    document.addEventListener('paste', handlePaste, true);
     document.addEventListener('change', handleChange, true);
+    document.addEventListener('blur', handleBlur, true);
     document.addEventListener('click', handleClick, true);
   }
 
@@ -272,10 +481,15 @@
     flushPendingTypeAsInput();
     active = false;
     onStep = null;
+    onLiveInput = null;
+    if (liveInputTimer) clearTimeout(liveInputTimer);
+    liveInputTimer = null;
     pendingType = null;
     document.removeEventListener('focusin', handleFocusIn, true);
     document.removeEventListener('input', handleInput, true);
+    document.removeEventListener('paste', handlePaste, true);
     document.removeEventListener('change', handleChange, true);
+    document.removeEventListener('blur', handleBlur, true);
     document.removeEventListener('click', handleClick, true);
   }
 

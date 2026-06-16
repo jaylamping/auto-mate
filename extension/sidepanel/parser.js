@@ -8,9 +8,15 @@
 (function (root) {
   const FIELD_SYNONYMS = {
     date: ['date', 'procedure date', 'service date', 'dos', 'date of service', 'encounter date'],
+    location: ['location', 'site', 'facility'],
     supervisor: ['supervisor', 'attending', 'attending provider', 'supervising provider', 'preceptor'],
-    mrn: ['mrn', 'patient mrn', 'medical record number', 'patient', 'patient name', 'patient id'],
-    procedure: ['procedure', 'procedures', 'procedure name', 'cpt', 'procedure description']
+    encounter: ['encounter', 'mrn', 'patient mrn', 'medical record number', 'patient', 'patient id'],
+    procedure: ['procedure', 'procedures', 'procedure name', 'cpt', 'procedure description'],
+    gender: ['gender', 'patient gender', 'sex'],
+    age: ['age', 'patient age'],
+    diagnosis: ['diagnosis', 'dx', 'icd'],
+    complications: ['complications', 'complication'],
+    notes: ['notes', 'procedure notes', 'comment', 'comments']
   };
 
   function normalizeHeader(h) {
@@ -38,6 +44,36 @@
       if (idx >= 0) mapping[field] = headers[idx];
     }
     return mapping;
+  }
+
+  /** Match a form label / header text to a logical field key using headers + synonyms. */
+  function matchFieldKeyFromLabel(text, headers) {
+    const norm = normalizeHeader(text).toLowerCase();
+    if (!norm) return null;
+    const guessed = guessMapping(headers);
+
+    for (const h of headers) {
+      if (normalizeHeader(h).toLowerCase() === norm) {
+        for (const [field, col] of Object.entries(guessed)) {
+          if (col === h) return field;
+        }
+        const hl = h.toLowerCase();
+        for (const [field, syns] of Object.entries(FIELD_SYNONYMS)) {
+          if (syns.some((syn) => hl === syn || hl.includes(syn))) return field;
+        }
+      }
+    }
+
+    for (const [field, col] of Object.entries(guessed)) {
+      if (col && normalizeHeader(col).toLowerCase() === norm) return field;
+    }
+
+    for (const [field, syns] of Object.entries(FIELD_SYNONYMS)) {
+      for (const syn of syns) {
+        if (norm === syn || norm.includes(syn) || syn.includes(norm)) return field;
+      }
+    }
+    return null;
   }
 
   function excelDateToISO(value) {
@@ -94,15 +130,20 @@
 
   /**
    * Turn parsed rows into normalized engine rows using a column mapping.
-   * Supports multiple procedures via either a delimited cell or multiple rows
-   * sharing the same MRN+date (grouped when groupProcedures is true).
+   * One spreadsheet row = one engine row. Delimited procedure cells still split.
    */
   function buildEngineRows(parsed, mapping, opts = {}) {
-    const { procedureDelimiter = /[;,|\/]+|\n/, groupProcedures = true, location = 'IMC' } = opts;
+    const { procedureDelimiter = /[;,|\/]+|\n/, location = 'IMC' } = opts;
     const dateCol = mapping.date;
     const supCol = mapping.supervisor;
-    const mrnCol = mapping.mrn;
+    const encounterCol = mapping.encounter || mapping.mrn;
     const procCol = mapping.procedure;
+    const locationCol = mapping.location;
+    const genderCol = mapping.gender;
+    const ageCol = mapping.age;
+    const diagnosisCol = mapping.diagnosis;
+    const complicationsCol = mapping.complications;
+    const notesCol = mapping.notes;
 
     const expanded = parsed.rows.map((r) => {
       const procRaw = procCol ? r[procCol] : '';
@@ -113,31 +154,28 @@
       return {
         date: dateCol ? excelDateToISO(r[dateCol]) : '',
         supervisor: supCol ? String(r[supCol] == null ? '' : r[supCol]).trim() : '',
-        mrn: mrnCol ? normalizeMRN(r[mrnCol]) : '',
+        mrn: encounterCol ? normalizeMRN(r[encounterCol]) : '',
         procedures,
-        location
+        location: locationCol
+          ? String(r[locationCol] == null ? '' : r[locationCol]).trim()
+          : location,
+        gender: genderCol ? String(r[genderCol] == null ? '' : r[genderCol]).trim() : '',
+        age: ageCol ? String(r[ageCol] == null ? '' : r[ageCol]).trim() : '',
+        diagnosis: diagnosisCol ? String(r[diagnosisCol] == null ? '' : r[diagnosisCol]).trim() : '',
+        complications: complicationsCol ? String(r[complicationsCol] == null ? '' : r[complicationsCol]).trim() : '',
+        notes: notesCol ? String(r[notesCol] == null ? '' : r[notesCol]).trim() : ''
       };
     });
 
-    if (!groupProcedures) return expanded;
-
-    // Group rows that share MRN + date + supervisor, merging procedures.
-    const map = new Map();
-    const order = [];
-    for (const row of expanded) {
-      const key = `${row.mrn}|${row.date}|${row.supervisor}`;
-      if (!map.has(key)) {
-        map.set(key, { ...row, procedures: [...row.procedures] });
-        order.push(key);
-      } else {
-        const existing = map.get(key);
-        for (const p of row.procedures) {
-          if (!existing.procedures.includes(p)) existing.procedures.push(p);
-        }
-      }
-    }
-    return order.map((k) => map.get(k));
+    return expanded;
   }
 
-  root.FAA_PARSER = { readFile, guessMapping, buildEngineRows, normalizeMRN, excelDateToISO };
+  root.FAA_PARSER = {
+    readFile,
+    guessMapping,
+    matchFieldKeyFromLabel,
+    buildEngineRows,
+    normalizeMRN,
+    excelDateToISO
+  };
 })(typeof window !== 'undefined' ? window : globalThis);

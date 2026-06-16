@@ -44,25 +44,16 @@ async function main() {
     if (el) el.dispatchEvent(new Event('change', { bubbles: true }));
   });
   await sleep(400);
-  const rowCount = await panel.$eval('#rowCount', (el) => el.textContent).catch(() => '?');
-  console.log(`  data preview: ${rowCount}`);
+  const fileMeta = await panel.$eval('#fileLoadedMeta', (el) => el.textContent).catch(() => '?');
+  console.log(`  data loaded: ${fileMeta}`);
   await page.screenshot({ path: path.join(OUT, '02-data-loaded.png') });
-  await panel.evaluate(() => document.getElementById('btnGoLearn').click());
-  await sleep(200);
-  await panel.waitForFunction(
-    () => {
-      const btn = document.querySelector('#btnStartLearn');
-      return btn && !btn.disabled && !btn.classList.contains('hidden');
-    },
-    { timeout: 5000 }
-  );
+  await panel.evaluate(() => document.getElementById('btnDataNext').click());
+  await sleep(300);
 
-  // --- Learn mode (mirrors the real MedHub flow) ---
-  await panel.evaluate(() => document.getElementById('btnStartLearn').click());
-  await sleep(150);
+  // --- Learn: auto-listening; fill form to map columns ---
   await page.type('#procedureDate', '06/15/2026', { delay: 8 });
   await page.type('#locationSpecify', 'IMC', { delay: 8 });
-  await page.click('#supTabSearch'); // navigation: reveal the Search pane
+  await page.click('#supTabSearch');
   await sleep(60);
   await page.type('#supSearch', 'Smith, John', { delay: 12 });
   await sleep(120);
@@ -72,15 +63,24 @@ async function main() {
   await sleep(120);
   await page.click('#procList .proc_row[data-name="Colonoscopy"] a.add');
   await page.click('#logProcedure');
-  await sleep(150);
-  await panel.click('#btnFinishLearn');
   await sleep(200);
-  await page.screenshot({ path: path.join(OUT, '03-learn-captured.png') });
 
-  const stepCount = await panel.$$eval('#stepList > li', (els) => els.length);
-  console.log(`  captured steps in UI: ${stepCount}`);
-  await panel.click('#btnSaveRecipe');
-  await sleep(200);
+  await panel.waitForFunction(
+    () => {
+      const btn = document.getElementById('btnLearnNext');
+      return btn && !btn.disabled;
+    },
+    { timeout: 10000 }
+  );
+  await panel.click('#btnLearnNext');
+  await sleep(400);
+
+  const recipeSaved = await panel.evaluate(() => {
+    const el = document.getElementById('recipeStatus');
+    return el && !el.classList.contains('hidden') && el.textContent.includes('steps');
+  });
+  console.log(`  recipe saved: ${recipeSaved}`);
+  await page.screenshot({ path: path.join(OUT, '03-learn-captured.png') });
 
   // --- Data tab already loaded; open Run ---
   await panel.click('.tab-trigger[data-tab="run"]');
@@ -119,7 +119,7 @@ async function main() {
 
   await browser.close();
 
-  if (stepCount < 6) throw new Error(`expected >=6 captured steps, got ${stepCount}`);
+  if (!recipeSaved) throw new Error('expected recipe to save after Learn Next');
   if (!summary || !/Total/.test(summary)) throw new Error('report summary missing');
   console.log('Demo drive complete. Screenshots in demo/screenshots/.');
 }

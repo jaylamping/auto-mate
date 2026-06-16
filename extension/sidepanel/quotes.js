@@ -18,7 +18,9 @@
     'Fur pillows are hard to actually sleep on',
     "I no longer have a manager. I can't be managed",
     'Everybody knows the movie get out is about me',
-    "To my fans\u2026 I can\u2019t finish the album because there\u2019s a bee in the studio"
+    'To my fans\u2026 I can\u2019t finish the album because there\u2019s a bee in the studio',
+    'Name one genius who ain\u2019t crazy',
+    'I like some of the Gaga songs, what the fuck she know about cameras?'
   ];
 
   root.FAA_randomQuote = function () {

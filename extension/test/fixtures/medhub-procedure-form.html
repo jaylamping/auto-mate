@@ -69,6 +69,10 @@
           'Cardiac Catheterization'
         ];
 
+        function normKey(s) {
+          return String(s).toLowerCase().replace(/[^a-z0-9]+/g, '');
+        }
+
         function renderResults(ul, items, makeText) {
           ul.innerHTML = '';
           if (!items.length) {
@@ -88,13 +92,13 @@
         var supInput = document.getElementById('sup_search');
         var supResults = document.getElementById('sup_results');
         supInput.addEventListener('input', function () {
-          var q = supInput.value.trim().toLowerCase();
-          if (!q) {
+          var qk = normKey(supInput.value);
+          if (!qk) {
             supResults.style.display = 'none';
             return;
           }
           var matches = SUPERVISORS.filter(function (s) {
-            return s.name.toLowerCase().indexOf(q) !== -1;
+            return normKey(s.name).indexOf(qk) !== -1;
           });
           renderResults(supResults, matches, function (s) { return s.name; });
         });
@@ -109,13 +113,13 @@
         var procInput = document.getElementById('proc_search');
         var procResults = document.getElementById('proc_results');
         procInput.addEventListener('input', function () {
-          var q = procInput.value.trim().toLowerCase();
-          if (!q) {
+          var qk = normKey(procInput.value);
+          if (!qk) {
             procResults.style.display = 'none';
             return;
           }
           var matches = PROCEDURES.filter(function (p) {
-            return p.toLowerCase().indexOf(q) !== -1;
+            return normKey(p).indexOf(qk) !== -1;
           });
           renderResults(procResults, matches, function (p) { return p; });
         });

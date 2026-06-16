@@ -6,117 +6,83 @@
     <title>auto-mate</title>
     <link rel="stylesheet" href="sidepanel.css" />
   </head>
-  <body class="flex min-h-screen flex-col">
+  <body class="flex h-full min-h-0 flex-col overflow-hidden">
     <header class="border-b px-4 py-4">
-      <div class="flex items-start justify-between gap-3">
+      <div class="flex items-center justify-between gap-3">
         <h1 class="text-lg font-semibold tracking-tight">auto&#8209;mate</h1>
-        <img id="kanyePortrait" class="kanye-portrait hidden" alt="" width="56" height="56" />
+        <img id="kanyePortrait" class="kanye-portrait" alt="" width="56" height="56" />
       </div>
     </header>
 
-    <nav class="border-b px-3 py-3">
+    <nav class="border-b px-4 py-3">
       <div class="tabs-list" role="tablist">
         <button type="button" class="tab-trigger active" data-tab="data" role="tab">1. Data</button>
-        <button type="button" class="tab-trigger" data-tab="setup" role="tab">2. Learn</button>
+        <button type="button" class="tab-trigger" data-tab="mapping" role="tab">2. Mapping</button>
         <button type="button" class="tab-trigger" data-tab="run" role="tab">3. Run</button>
         <button type="button" class="tab-trigger" data-tab="report" role="tab">Report</button>
       </div>
     </nav>
 
-    <main class="min-h-0 flex-1 overflow-y-auto p-4 space-y-4">
+    <main class="min-h-0 flex-1 overflow-y-auto p-4">
       <!-- DATA (first — required before Learn) -->
-      <section class="panel active space-y-4" data-panel="data">
+      <section class="panel active" data-panel="data">
         <div class="alert-muted">
-          Start here: upload your <strong>Slicer Dicer export</strong>. auto&#8209;mate uses it to auto&#8209;label fields
-          when you record the form in Learn mode.
+          Start Here: upload your procedure file, then document one procedure on the Mapping step — columns map as you fill each field.
         </div>
-        <div id="dropzone" class="dropzone">
-          <div class="space-y-1">
-            <p class="text-sm font-medium">Drag your Slicer Dicer export here</p>
-            <p class="text-xs text-muted-foreground">.xlsx, .xls or .csv &mdash; or click to browse</p>
-          </div>
-          <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
-        </div>
-        <div id="fileInfo" class="text-sm min-h-[1.25rem]"></div>
-
-        <div id="mappingBox" class="card hidden">
-          <div class="card-header">
-            <h3 class="card-title">Column mapping</h3>
-            <p class="card-description">auto-mate guessed these from your headers. Override if needed, then go to Learn.</p>
-          </div>
-          <div class="card-content space-y-4">
-            <div class="grid grid-cols-2 gap-3">
-              <label class="space-y-1.5">
-                <span class="label">Date</span>
-                <select class="select" data-map="date"></select>
-              </label>
-              <label class="space-y-1.5">
-                <span class="label">Supervisor</span>
-                <select class="select" data-map="supervisor"></select>
-              </label>
-              <label class="space-y-1.5">
-                <span class="label">Patient MRN</span>
-                <select class="select" data-map="mrn"></select>
-              </label>
-              <label class="space-y-1.5">
-                <span class="label">Procedure</span>
-                <select class="select" data-map="procedure"></select>
-              </label>
-            </div>
-            <label class="form-row cursor-pointer">
-              <input type="checkbox" id="groupProcedures" checked class="mt-0.5 rounded border-input" />
-              <span class="text-sm leading-snug">Combine multiple procedure rows that share the same MRN + date</span>
-            </label>
-            <div>
-              <div class="mb-2 flex items-baseline justify-between gap-2">
-                <h4 class="text-sm font-medium">Preview</h4>
-                <span id="rowCount" class="text-xs text-muted-foreground"></span>
+        <div class="data-step-body">
+          <div id="uploadArea">
+            <div id="dropzone" class="dropzone">
+              <div class="space-y-1">
+                <p class="text-sm font-medium">Drag your Slicer Dicer export here</p>
+                <p class="text-xs text-muted-foreground">.xlsx, .xls or .csv &mdash; or click to browse</p>
               </div>
-              <div id="preview" class="preview-table-wrap"></div>
             </div>
-            <button type="button" id="btnGoLearn" class="btn-primary w-full hidden">Continue to Learn &rarr;</button>
+            <input type="file" id="fileInput" accept=".xlsx,.xls,.csv" hidden />
+            <div id="fileInfo" class="text-sm text-destructive empty:hidden"></div>
+          </div>
+
+          <div id="fileLoadedBar" class="file-loaded-bar hidden">
+            <button type="button" id="btnClearFile" class="file-clear-btn" aria-label="Remove file" title="Remove file">
+              <span aria-hidden="true">&times;</span>
+            </button>
+            <div class="file-loaded-info">
+              <p id="fileLoadedName" class="truncate text-sm font-medium"></p>
+              <p id="fileLoadedMeta" class="text-xs text-muted-foreground"></p>
+            </div>
+          </div>
+
+          <div id="dataStepNav" class="flex flex-wrap justify-end gap-2">
+            <button type="button" id="btnDataNext" class="btn-primary" disabled>Next &rarr;</button>
           </div>
         </div>
       </section>
 
-      <!-- LEARN -->
-      <section class="panel space-y-4" data-panel="setup">
-        <div class="alert-muted">
-          After logging in, you can <strong>Start Learn mode</strong> and walk through your workflow once &mdash; the app
-          should remember each field moving forward.
-        </div>
+      <!-- MAPPING -->
+      <section class="panel panel-mapping" data-panel="mapping">
+        <div id="learnReadiness" class="text-sm empty:hidden"></div>
+        <div id="recipeStatus" class="text-sm hidden"></div>
 
-        <div id="learnReadiness" class="text-sm min-h-[1.25rem]"></div>
-        <div id="recipeStatus" class="text-sm min-h-[1.25rem]"></div>
-
-        <div class="flex flex-wrap gap-2">
-          <button type="button" id="btnStartLearn" class="btn-primary" disabled>Start Learn mode</button>
-          <button type="button" id="btnFinishLearn" class="btn-primary hidden">Finish &amp; review</button>
-        </div>
-
-        <div id="learnSteps" class="card hidden">
-          <div class="card-header">
-            <h3 class="card-title">Captured steps</h3>
-            <p class="card-description">Steps are auto-labeled from field names and your spreadsheet. Adjust any that look wrong, then save.</p>
+        <div id="mappingBox" class="card hidden">
+          <div class="card-header card-header-row">
+            <h3 class="card-title">Field mapping</h3>
+            <span id="mappingListeningBadge" class="badge-listening hidden">Listening</span>
           </div>
           <div class="card-content space-y-3">
-            <ol id="stepList" class="space-y-3 list-none p-0 m-0"></ol>
-            <button type="button" id="btnSaveRecipe" class="btn-primary w-full">Save recipe</button>
+            <div id="mappingFieldLoading" class="mapping-field-loading">
+              <span class="mapping-spinner" aria-hidden="true"></span>
+              <span>Waiting for you to fill a field on the form…</span>
+            </div>
+            <div id="mappingFieldsList" class="mapping-fields-list hidden space-y-2"></div>
           </div>
         </div>
 
-        <details class="rounded-lg border px-3 py-2 text-sm">
-          <summary class="cursor-pointer text-muted-foreground font-medium">Manage recipe</summary>
-          <div class="mt-3 flex flex-wrap gap-2">
-            <button type="button" id="btnViewRecipe" class="btn-outline btn-sm">View JSON</button>
-            <button type="button" id="btnClearRecipe" class="btn-destructive btn-sm">Clear recipe</button>
-          </div>
-          <pre id="recipeJson" class="code-block hidden"></pre>
-        </details>
+        <div id="learnStepNav" class="flex flex-wrap justify-end gap-2 hidden">
+          <button type="button" id="btnLearnNext" class="btn-primary" disabled>Next &rarr;</button>
+        </div>
       </section>
 
       <!-- RUN -->
-      <section class="panel space-y-4" data-panel="run">
+      <section class="panel" data-panel="run">
         <div id="runReadiness" class="text-sm min-h-[1.25rem]"></div>
 
         <label class="form-row cursor-pointer border rounded-lg">
@@ -146,19 +112,30 @@
       </section>
 
       <!-- REPORT -->
-      <section class="panel space-y-4" data-panel="report">
-        <div id="reportSummary" class="alert-muted">No session yet.</div>
+      <section class="panel" data-panel="report">
+        <div id="reportSummary" class="report-summary-filters alert-muted">No session yet.</div>
         <div class="flex flex-wrap gap-2">
           <button type="button" id="btnExportHtml" class="btn-outline btn-sm">Export HTML</button>
           <button type="button" id="btnExportCsv" class="btn-outline btn-sm">Export CSV</button>
           <button type="button" id="btnExportJson" class="btn-outline btn-sm">Export JSON</button>
         </div>
-        <div id="reportBody" class="report-body code-block font-sans text-xs"></div>
+        <div id="reportPreview" class="report-preview" tabindex="0" aria-label="Session report preview — hover or focus to enlarge">
+          <div class="report-preview-hint">Hover to enlarge</div>
+          <div id="reportBody" class="report-body"></div>
+        </div>
       </section>
     </main>
 
+    <details id="manageRecipe" class="footer-panel recipe-manage shrink-0 border-t px-4 py-2 text-sm">
+      <summary class="cursor-pointer text-muted-foreground font-medium">Manage recipe</summary>
+      <div class="mt-3 flex flex-wrap gap-2">
+        <button type="button" id="btnViewRecipe" class="btn-outline btn-sm">View JSON</button>
+        <button type="button" id="btnClearRecipe" class="btn-destructive btn-sm">Clear recipe</button>
+      </div>
+      <pre id="recipeJson" class="code-block hidden"></pre>
+    </details>
+
     <footer id="quoteFooter" class="quote-footer">
-      <p class="quote-label">Official Statement</p>
       <blockquote id="tagline" class="quote-text"></blockquote>
     </footer>
 

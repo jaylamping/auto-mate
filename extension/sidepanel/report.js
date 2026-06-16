@@ -27,6 +27,18 @@
     };
   }
 
+  function rowStatus(row) {
+    if (!row || !row.result) return 'failed';
+    if (row.result.ok) return 'success';
+    if (row.result.aborted) return 'stopped';
+    return 'failed';
+  }
+
+  function filterRows(rows, filter) {
+    if (!filter || filter === 'all') return rows || [];
+    return (rows || []).filter((r) => rowStatus(r) === filter);
+  }
+
   function esc(s) {
     return String(s == null ? '' : s)
       .replace(/&/g, '&amp;')
@@ -35,9 +47,12 @@
       .replace(/"/g, '&quot;');
   }
 
-  function toHTML(session) {
+  function toHTML(session, options = {}) {
+    const filter = options.filter || 'all';
     const s = summarize(session);
-    const rowsHtml = (session.rows || [])
+    const visibleRows = filterRows(session.rows, filter);
+    const rowsHtml = visibleRows.length
+      ? visibleRows
       .map((r) => {
         const actions = (r.result && r.result.actions) || [];
         const actionRows = actions
@@ -60,7 +75,13 @@
           <tbody>${actionRows}</tbody></table>
         </section>`;
       })
-      .join('');
+      .join('')
+      : `<p class="report-empty">No ${esc(filter)} rows in this session.</p>`;
+
+  const filterBanner =
+    filter !== 'all'
+      ? `<div class="banner report-filter-banner">Showing <b>${visibleRows.length}</b> of ${s.total} rows (${esc(filter)} only). Click a summary card to change filter.</div>`
+      : '';
 
     return `<!doctype html><html><head><meta charset="utf-8"><title>auto-mate session report</title>
       <style>
@@ -79,11 +100,12 @@
       <h1>auto-mate session report</h1>
       <div class="sub">Started ${esc(s.startedAt)} &middot; Finished ${esc(s.finishedAt)}</div>
       ${s.dryRun ? '<div class="banner"><b>DRY RUN</b> &mdash; no submissions were made.</div>' : ''}
+      ${filterBanner}
       <div class="cards">
-        <div class="card"><b>${s.total}</b>Rows</div>
-        <div class="card"><b>${s.succeeded}</b>Succeeded</div>
-        <div class="card"><b>${s.failed}</b>Failed</div>
-        <div class="card"><b>${s.skipped}</b>Stopped</div>
+        <div class="card card-filter" data-report-filter="all" role="button" tabindex="0"><b>${s.total}</b>Rows</div>
+        <div class="card card-filter" data-report-filter="success" role="button" tabindex="0"><b>${s.succeeded}</b>Succeeded</div>
+        <div class="card card-filter" data-report-filter="failed" role="button" tabindex="0"><b>${s.failed}</b>Failed</div>
+        <div class="card card-filter" data-report-filter="stopped" role="button" tabindex="0"><b>${s.skipped}</b>Stopped</div>
       </div>
       ${rowsHtml}
     </body></html>`;
@@ -126,5 +148,5 @@
     setTimeout(() => URL.revokeObjectURL(url), 2000);
   }
 
-  root.FAA_REPORT = { summarize, toHTML, toCSV, toJSON, download };
+  root.FAA_REPORT = { summarize, rowStatus, filterRows, toHTML, toCSV, toJSON, download };
 })(typeof window !== 'undefined' ? window : globalThis);

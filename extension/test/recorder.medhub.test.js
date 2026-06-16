@@ -55,7 +55,37 @@ module.exports = async function run() {
   assert.ok(procAuto, 'procedure autocomplete should use the proc_row option selector');
   assert.strictEqual(procAuto.clickRel, 'a.add', 'procedure step records the "+" add control as clickRel');
 
+  // Procedure "+" without typing in search still records as autocomplete.
+  const steps2 = [];
+  RECORDER.start((step) => steps2.push(step));
+  const biopsyAdd = document.querySelector('#procList .proc_row[data-name="Biopsy"] a.add');
+  clickEl(window, biopsyAdd);
+  RECORDER.stop();
+  const procOnly = steps2.find((s) => s.role === 'autocomplete' && /proc_row/.test(s.optionSelector || ''));
+  assert.ok(procOnly, 'procedure "+" without search typing should still record');
+
   assert.ok(steps.some((s) => s.role === 'submit'), 'should capture Log Procedure as submit');
 
-  console.log(`  recorder.medhub: ${steps.length} steps (${clicks.length} nav-click, ${autos.length} autocomplete), procedure clickRel="${procAuto.clickRel}".`);
+  console.log(
+    `  recorder.medhub: ${steps.length} steps (${clicks.length} nav-click, ${autos.length} autocomplete), procedure clickRel="${procAuto.clickRel}".`
+  );
+
+  // Supervisor result pick without pending type (e.g. recorder restarted / blur cleared type state).
+  {
+    const page2 = createPage('medhub-procedure-log.html');
+    const { RECORDER: REC2 } = page2;
+    const steps3 = [];
+    REC2.start((step) => steps3.push(step));
+    clickEl(page2.window, page2.document.getElementById('supTabSearch'));
+    typeValue(page2.window, page2.document.getElementById('supSearch'), 'Lee, Karen');
+    await sleep(20);
+    REC2.stop();
+    REC2.start((step) => steps3.push(step));
+    clickEl(page2.window, page2.document.querySelector('#supResults li.sup_result'));
+    REC2.stop();
+    const supAuto = steps3.find((s) => s.role === 'autocomplete' && /sup/i.test(s.optionSelector || ''));
+    assert.ok(supAuto, 'supervisor result click should record autocomplete');
+    assert.ok(supAuto.sampleOptionText, 'supervisor autocomplete should carry picked label');
+    console.log('  recorder.medhub: supervisor result click records autocomplete without pending type.');
+  }
 };

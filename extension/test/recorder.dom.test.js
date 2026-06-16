@@ -11,7 +11,8 @@ module.exports = async function run() {
   const { window, document, RECORDER } = page;
 
   const steps = [];
-  RECORDER.start((step) => steps.push(step));
+  const live = [];
+  RECORDER.start((step) => steps.push(step), (payload) => live.push(payload));
 
   // Date
   typeValue(window, document.getElementById('proc_date'), '01/05/2026');
@@ -26,8 +27,14 @@ module.exports = async function run() {
   assert.ok(supOption, 'fixture should render a supervisor option');
   clickEl(window, supOption);
 
-  // Patient MRN
-  typeValue(window, document.getElementById('patient_mrn'), '000123456');
+  // Patient MRN — debounced input then blur re-runs column match
+  const mrn = document.getElementById('patient_mrn');
+  typeValue(window, mrn, '00012');
+  await sleep(350);
+  assert.ok(live.some((l) => l.debounced && l.sampleValue === '00012'), 'debounced input should emit');
+  typeValue(window, mrn, '000123456');
+  mrn.dispatchEvent(new window.FocusEvent('blur', { bubbles: true }));
+  assert.ok(live.some((l) => l.blurred && l.sampleValue === '000123456'), 'blur should emit live field state');
 
   // Procedure: type, results show, click an option.
   const proc = document.getElementById('proc_search');
@@ -37,7 +44,18 @@ module.exports = async function run() {
   assert.ok(procOption, 'fixture should render a procedure option');
   clickEl(window, procOption);
 
+  // Tab focus + blur without typing should not emit live mapping events.
+  const tabLive = [];
+  RECORDER.stop();
+  RECORDER.start(() => {}, (payload) => tabLive.push(payload));
+  const skip = document.getElementById('proc_location');
+  skip.dispatchEvent(new window.FocusEvent('focusin', { bubbles: true }));
+  skip.dispatchEvent(new window.FocusEvent('blur', { bubbles: true }));
+  assert.strictEqual(tabLive.length, 0, 'focus/blur without edit should not emit');
+  RECORDER.stop();
+
   // Submit
+  RECORDER.start((step) => steps.push(step));
   clickEl(window, document.getElementById('submitBtn'));
 
   RECORDER.stop();

@@ -17,6 +17,7 @@ async function main() {
   }
 
   const suites = [
+    ['dom-utils', './dom-utils.test.js'],
     ['recorder.dom', './recorder.dom.test.js'],
     ['engine.dom', './engine.dom.test.js'],
     ['recorder.medhub', './recorder.medhub.test.js'],

@@ -1,24 +1,34 @@
 /**
  * auto-mate side panel controller.
  *
- * Orchestrates the four-step UX (Data -> Learn -> Run -> Report). Talks
+ * Orchestrates the four-step UX (Data -> Mapping -> Run -> Report). Talks
  * to the page's content scripts via chrome.tabs.sendMessage and receives their
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
 (function () {
-  const { MSG, ROLE, FIELD, STORAGE_KEYS } = window.FAA_MSG;
+  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch } = window.FAA_MSG;
   const PARSER = window.FAA_PARSER;
   const REPORT = window.FAA_REPORT;
+
+  const TAB_ORDER = ['data', 'mapping', 'run', 'report'];
+  const FORM_FIELD_KEYS = FORM_FIELDS.map((f) => f.key);
+  const REQUIRED_FIELD_KEYS = FORM_FIELDS.filter((f) => f.required).map((f) => f.key);
+  const FIELD_LABEL_BY_KEY = Object.fromEntries(FORM_FIELDS.map((f) => [f.key, f.label]));
 
   const state = {
     recordedSteps: [],
     recipe: null,
     parsed: null,
     mapping: {},
+    formBindings: {},
     engineRows: [],
     session: null,
     running: false,
-    rowResolver: null
+    rowResolver: null,
+    maxTabIndex: 0,
+    learnRecording: false,
+    fieldRevealOrder: [],
+    reportFilter: 'all'
   };
 
   const $ = (sel) => document.querySelector(sel);
@@ -37,37 +47,229 @@
   }
 
   function switchTab(tabName) {
+    const prevTab = getActiveTabName();
+    if (prevTab === 'mapping' && tabName !== 'mapping') stopLearnRecording();
+
     $$('.tab-trigger').forEach((t) => t.classList.toggle('active', t.dataset.tab === tabName));
     $$('.panel').forEach((p) => p.classList.toggle('active', p.dataset.panel === tabName));
     if (tabName === 'run') refreshRunReadiness();
-    if (tabName === 'setup') refreshLearnReadiness();
+    if (tabName === 'mapping') {
+      refreshLearnReadiness();
+      prepareMappingTab();
+      startLearnRecording();
+    }
+  }
+
+  function refreshTabLocks() {
+    $$('.tab-trigger').forEach((tab) => {
+      const idx = TAB_ORDER.indexOf(tab.dataset.tab);
+      const locked = idx > state.maxTabIndex;
+      tab.disabled = locked;
+      tab.classList.toggle('tab-locked', locked);
+    });
+  }
+
+  function advanceToTab(tabName) {
+    const idx = TAB_ORDER.indexOf(tabName);
+    if (idx > state.maxTabIndex) state.maxTabIndex = idx;
+    refreshTabLocks();
+    switchTab(tabName);
+  }
+
+  function refreshDataStepNav() {
+    const next = $('#btnDataNext');
+    if (!next) return;
+    const loaded = Boolean(state.parsed);
+    next.disabled = !loaded;
+    next.classList.toggle('btn-primary-ready', loaded);
+  }
+
+  function refreshLearnMappingVisibility() {
+    const formBox = $('#mappingBox');
+    const nav = $('#learnStepNav');
+    const show = Boolean(state.parsed);
+    if (formBox) formBox.classList.toggle('hidden', !show);
+    if (nav) nav.classList.toggle('hidden', !show);
+    if (state.parsed) {
+      renderFormMapping();
+      refreshLearnStepNav();
+    }
+  }
+
+  function hasDocumentedWorkflow() {
+    return state.recordedSteps.length > 0;
+  }
+
+  function isColumnMappingComplete() {
+    return REQUIRED_FIELD_KEYS.every((f) => state.mapping[f]);
+  }
+
+  /** Next when user documented once (selectors) and required columns are mapped. */
+  function isMappingComplete() {
+    return hasDocumentedWorkflow() && isColumnMappingComplete();
+  }
+
+  function missingRequiredValuesForRow(row) {
+    const missing = [];
+    for (const f of REQUIRED_FIELD_KEYS) {
+      if (f === FIELD.PROCEDURE) {
+        if (!row.procedures || !row.procedures.length) missing.push(FIELD_LABEL_BY_KEY[f]);
+        continue;
+      }
+      if (f === FIELD.ENCOUNTER) {
+        if (!row.mrn || !String(row.mrn).trim()) missing.push(FIELD_LABEL_BY_KEY[f]);
+        continue;
+      }
+      const v = row[f];
+      if (v == null || String(v).trim() === '') missing.push(FIELD_LABEL_BY_KEY[f]);
+    }
+    return missing;
+  }
+
+  function refreshLearnStepNav() {
+    const next = $('#btnLearnNext');
+    if (!next) return;
+    const ready = isMappingComplete();
+    next.disabled = !ready;
+    next.classList.toggle('btn-primary-ready', ready);
   }
 
   function refreshLearnReadiness() {
     const el = $('#learnReadiness');
-    const btn = $('#btnStartLearn');
-    if (!el || !btn) return;
-    if (btn.classList.contains('hidden')) return; // learn session in progress
-
-    if (!hasData()) {
-      el.innerHTML =
-        '<span class="badge-outline border-amber-500/50 text-amber-400">Upload spreadsheet first</span> ' +
-        'Go to the <strong>Data</strong> tab and load your Slicer Dicer export before recording.';
-      btn.disabled = true;
+    if (!el) return;
+    if (!state.parsed) {
+      el.textContent = 'Go to the Data tab and load your file before continuing.';
     } else {
-      el.innerHTML =
-        `<span class="badge-secondary">Spreadsheet loaded</span> ` +
-        `<strong>${state.engineRows.length}</strong> entries ready — open the form and start Learn.`;
-      btn.disabled = false;
+      el.textContent = '';
     }
+  }
+
+  function refreshMappingListeningBadge() {
+    const badge = $('#mappingListeningBadge');
+    if (!badge) return;
+    const onMapping = getActiveTabName() === 'mapping';
+    badge.classList.toggle('hidden', !onMapping || !state.parsed || !state.learnRecording);
+  }
+
+  async function startLearnRecording() {
+    if (!state.parsed || state.learnRecording) return;
+    try {
+      await sendToTab(MSG.START_LEARN);
+      state.learnRecording = true;
+      refreshMappingListeningBadge();
+    } catch (_) {
+      /* toast already shown */
+    }
+  }
+
+  async function stopLearnRecording() {
+    if (!state.learnRecording) return;
+    try {
+      await sendToTab(MSG.STOP_LEARN);
+    } catch (_) {}
+    state.learnRecording = false;
+    refreshMappingListeningBadge();
+  }
+
+  function prepareMappingTab() {
+    if (!state.parsed) return;
+    rebuildFieldRevealOrderFromState();
+    renderFormMapping();
+    refreshMappingListeningBadge();
+    if (REQUIRED_FIELD_KEYS.some((f) => state.mapping[f])) {
+      rebuildEngineRows();
+    } else {
+      state.engineRows = [];
+      refreshRunReadiness();
+    }
+    refreshLearnStepNav();
+  }
+
+  function discoverField(mapKey) {
+    if (!mapKey || state.fieldRevealOrder.includes(mapKey)) return;
+    state.fieldRevealOrder.push(mapKey);
+  }
+
+  function rebuildFieldRevealOrderFromState() {
+    if (state.fieldRevealOrder.length) return;
+    for (const key of FORM_FIELD_KEYS) {
+      if (key === FIELD.PROCEDURE && !isProcedureRegistered()) continue;
+      if (state.formBindings[key] || state.mapping[key]) discoverField(key);
+    }
+  }
+
+  function isProcedureLearnStep(step) {
+    if (!step) return false;
+    if (step._field === FIELD.PROCEDURE) return true;
+    if (step.clickRel === 'a.add') return true;
+    if (step.optionSelector && /proc_row|proc/i.test(step.optionSelector)) return true;
+    return false;
+  }
+
+  function isProcedureRegistered() {
+    if (state.fieldRevealOrder.includes(FIELD.PROCEDURE)) return true;
+    return state.recordedSteps.some((s) => isProcedureLearnStep(s));
+  }
+
+  function shouldRevealMappingField(mapKey, step) {
+    if (mapKey === FIELD.PROCEDURE) return isProcedureLearnStep(step);
+    return true;
+  }
+
+  function normalizeLearnStep(step) {
+    if (!step._field) step._field = autoGuessField(step);
+    if (isProcedureLearnStep(step)) step._field = FIELD.PROCEDURE;
+  }
+
+  function revealProcedureInMapping(step) {
+    discoverField(FIELD.PROCEDURE);
+    state.formBindings[FIELD.PROCEDURE] = { ...step, _field: FIELD.PROCEDURE };
+    renderFormMapping();
+    flashColField(FIELD.PROCEDURE);
+  }
+
+  function formLabelForKey(mapKey) {
+    const def = FORM_FIELDS.find((f) => f.key === mapKey);
+    if (mapKey === FIELD.PROCEDURE && def) return def.label;
+    const binding = state.formBindings[mapKey];
+    if (binding && binding.text) return binding.text;
+    return def ? def.label : mapKey;
   }
 
   // ---- Tabs ----
   $$('.tab-trigger').forEach((tab) => {
-    tab.addEventListener('click', () => switchTab(tab.dataset.tab));
+    tab.addEventListener('click', () => {
+      const idx = TAB_ORDER.indexOf(tab.dataset.tab);
+      if (idx > state.maxTabIndex) return;
+      switchTab(tab.dataset.tab);
+    });
   });
 
-  $('#btnGoLearn').addEventListener('click', () => switchTab('setup'));
+  $('#btnDataNext').addEventListener('click', () => {
+    if (!state.parsed) {
+      toast('Upload a procedure file first.');
+      return;
+    }
+    advanceToTab('mapping');
+  });
+
+  $('#btnLearnNext').addEventListener('click', async () => {
+    if (!hasDocumentedWorkflow()) {
+      toast('Document one procedure on the form first — we need those field selectors.');
+      return;
+    }
+    if (!isColumnMappingComplete()) {
+      toast('Map all required spreadsheet columns before continuing.');
+      return;
+    }
+    inferMappingFromLearn();
+    renderFormMapping();
+    rebuildEngineRows();
+    await stopLearnRecording();
+    await saveRecipeFromSteps();
+    if (!state.recipe) return;
+    advanceToTab('run');
+  });
 
   // ---- Active tab + content-script injection ----
   async function getActiveTab() {
@@ -85,7 +287,7 @@
   async function ensureInjected(tabId) {
     try {
       const res = await chrome.tabs.sendMessage(tabId, { type: MSG.PING });
-      if (res && res.type === MSG.PONG) return true;
+      if (res && res.type === MSG.PONG && res.buildId === BUILD_ID) return true;
     } catch (_) {
       // not yet injected
     }
@@ -115,6 +317,9 @@
       case MSG.STEP_RECORDED:
         onStepRecorded(message.payload);
         break;
+      case MSG.FIELD_INPUT:
+        onLiveFieldInput(message.payload);
+        break;
       case MSG.ACTION_LOG:
         onActionLog(message.payload);
         break;
@@ -131,145 +336,316 @@
   });
 
   // ================= LEARN =================
-  $('#btnStartLearn').addEventListener('click', async () => {
-    if (!hasData()) {
-      toast('Upload your spreadsheet on the Data tab first.');
-      switchTab('data');
-      return;
+  function fieldValueForMapping(step) {
+    if (step.role === ROLE.AUTOCOMPLETE) {
+      const picked = String(step.sampleOptionText ?? '').trim();
+      const typed = String(step.sampleValue ?? '').trim();
+      if (picked && picked.length >= typed.length) return picked;
+      return typed || picked;
     }
-    state.recordedSteps = [];
-    renderSteps();
-    try {
-      await sendToTab(MSG.START_LEARN);
-      $('#btnStartLearn').classList.add('hidden');
-      $('#btnFinishLearn').classList.remove('hidden');
-      $('#learnSteps').classList.remove('hidden');
-      toast('Learn mode on. Fill the form once in the page.');
-    } catch (_) {
-      /* toast already shown */
-    }
-  });
+    return String(step.sampleValue ?? step.sampleOptionText ?? '').trim();
+  }
 
-  $('#btnFinishLearn').addEventListener('click', async () => {
-    try {
-      await sendToTab(MSG.STOP_LEARN);
-    } catch (_) {}
-    $('#btnFinishLearn').classList.add('hidden');
-    $('#btnStartLearn').classList.remove('hidden');
-    refreshLearnReadiness();
-    if (!state.recordedSteps.length) toast('No steps captured. Try again and interact with the form fields.');
-  });
+  function minMappingLenForStep(step) {
+    const mapKey = STEP_FIELD_TO_MAP[step._field];
+    if (mapKey) return minMappingLenForFieldKey(mapKey);
+    return minMappingLenFromHaystack(`${step.text || ''} ${step.sampleValue || ''}`);
+  }
+
+  function shouldRunFieldMapping(step) {
+    return fieldValueForMapping(step).length >= minMappingLenForStep(step);
+  }
+
+  function shouldInferColumnMapping(mapKey, step) {
+    const val = fieldValueForMapping(step);
+    const minLen = mapKey
+      ? minColumnInferLenForFieldKey(mapKey)
+      : minMappingLenFromHaystack(`${step.text || ''} ${val}`);
+    return val.length >= minLen;
+  }
+
+  function onLiveFieldInput(live) {
+    if (!live || (!live.blurred && !live.debounced)) return;
+    const step = { ...live, _field: autoGuessField(live) };
+    if (!shouldRunFieldMapping(step)) return;
+    const mapKey = STEP_FIELD_TO_MAP[step._field];
+    if (!mapKey) return;
+    applyStepFormBinding(step);
+    if (live.blurred) inferAndSetColumnForField(mapKey, step);
+    refreshLearnStepNav();
+  }
 
   function onStepRecorded(step) {
     state.recordedSteps.push(step);
-    renderSteps();
+    normalizeLearnStep(step);
+    if (isProcedureLearnStep(step)) {
+      revealProcedureInMapping(step);
+    } else {
+      applyStepFormBinding(step);
+    }
+    inferAndSetColumnForField(STEP_FIELD_TO_MAP[step._field], step);
+    refreshLearnStepNav();
   }
 
-  const FIELD_OPTIONS = [
-    { value: '', label: 'Ignore this step' },
-    { value: FIELD.DATE, label: 'Date' },
-    { value: FIELD.LOCATION, label: 'Location (static "IMC")' },
-    { value: FIELD.SUPERVISOR, label: 'Supervisor' },
-    { value: FIELD.MRN, label: 'Patient MRN' },
-    { value: FIELD.PROCEDURE, label: 'Procedure' },
-    { value: FIELD.CLICK, label: 'Click / navigation (keep)' },
-    { value: FIELD.SUBMIT, label: 'Submit' }
-  ];
+  const STEP_FIELD_TO_MAP = {
+    [FIELD.DATE]: FIELD.DATE,
+    [FIELD.LOCATION]: FIELD.LOCATION,
+    [FIELD.SUPERVISOR]: FIELD.SUPERVISOR,
+    [FIELD.ENCOUNTER]: FIELD.ENCOUNTER,
+    [FIELD.PROCEDURE]: FIELD.PROCEDURE,
+    [FIELD.GENDER]: FIELD.GENDER,
+    [FIELD.AGE]: FIELD.AGE,
+    [FIELD.DIAGNOSIS]: FIELD.DIAGNOSIS,
+    [FIELD.COMPLICATIONS]: FIELD.COMPLICATIONS,
+    [FIELD.NOTES]: FIELD.NOTES
+  };
 
-  // Heuristic auto-labeling. Combined with value-matching against the loaded
-  // spreadsheet (see autoMapFromData), this means the user usually only needs
-  // to glance at the inferred mapping and click Save - no manual labeling.
   function autoGuessField(step) {
     const hay = `${step.text || ''} ${step.sampleValue || ''}`.toLowerCase();
     if (step.role === ROLE.SUBMIT) return FIELD.SUBMIT;
-    if (step.role === ROLE.CLICK) return FIELD.CLICK; // keep nav clicks (e.g. Search tab)
-    if (/date|dos/.test(hay)) return FIELD.DATE;
+    if (step.role === ROLE.CLICK) return FIELD.CLICK;
+    if (/procedure\s*date|date of service|\bdos\b/.test(hay)) return FIELD.DATE;
+    if (/^date\b|\bdate\b/.test(hay) && !/update/.test(hay)) return FIELD.DATE;
     if (/location|site|facility/.test(hay)) return FIELD.LOCATION;
     if (/supervis|attending|precept/.test(hay)) return FIELD.SUPERVISOR;
-    if (/encounter|mrn|patient|record/.test(hay)) return FIELD.MRN;
+    if (/encounter|mrn|patient id|medical record/.test(hay)) return FIELD.ENCOUNTER;
+    if (/patient gender|\bgender\b|\bsex\b/.test(hay)) return FIELD.GENDER;
+    if (/patient age|\bage\b/.test(hay)) return FIELD.AGE;
+    if (/diagnos|\bicd\b|\bdx\b/.test(hay)) return FIELD.DIAGNOSIS;
+    if (/complicat/.test(hay)) return FIELD.COMPLICATIONS;
+    if (/procedure\s*notes?|\bcomments?\b/.test(hay)) return FIELD.NOTES;
     if (/procedure|cpt/.test(hay)) return FIELD.PROCEDURE;
-    if (step.role === ROLE.AUTOCOMPLETE) return FIELD.PROCEDURE;
+    if (step.role === ROLE.AUTOCOMPLETE) {
+      if (/supervis|attending/.test(hay)) return FIELD.SUPERVISOR;
+      return FIELD.PROCEDURE;
+    }
     return '';
   }
 
-  // If a spreadsheet is already loaded, refine guesses by matching what the
-  // user typed during Learn against the first data row's columns.
-  function autoMapFromData() {
-    if (!state.parsed || !state.engineRows.length) return;
-    const sample = state.engineRows[0];
-    const candidates = {
-      [FIELD.DATE]: [sample.date],
-      [FIELD.SUPERVISOR]: [sample.supervisor],
-      [FIELD.MRN]: [sample.mrn],
-      [FIELD.PROCEDURE]: sample.procedures || []
-    };
-    for (const step of state.recordedSteps) {
-      const typed = String(step.sampleValue == null ? '' : step.sampleValue).trim().toLowerCase();
-      if (!typed) continue;
-      for (const [field, vals] of Object.entries(candidates)) {
-        if (vals.some((v) => v && String(v).trim().toLowerCase().startsWith(typed.slice(0, 6)) && typed.length >= 2)) {
-          step._field = field;
-        }
-      }
-    }
-    renderSteps();
+  function flashMapRow(mapKey) {
+    const row = document.querySelector(`.map-field-row[data-form-field="${mapKey}"]`);
+    if (!row) return;
+    row.classList.remove('map-field-flash');
+    row.offsetWidth;
+    row.classList.add('map-field-flash');
+    setTimeout(() => row.classList.remove('map-field-flash'), 1200);
   }
 
-  function renderSteps() {
-    const list = $('#stepList');
-    list.innerHTML = '';
-    state.recordedSteps.forEach((step, i) => {
-      const li = document.createElement('li');
-      const guess = step._field != null ? step._field : autoGuessField(step);
-      step._field = guess;
-      const select = document.createElement('select');
-      select.className = 'select';
-      FIELD_OPTIONS.forEach((opt) => {
-        const o = document.createElement('option');
-        o.value = opt.value;
-        o.textContent = opt.label;
-        if (opt.value === guess) o.selected = true;
-        select.appendChild(o);
-      });
-      select.addEventListener('change', () => {
-        step._field = select.value;
-      });
-      const meta = document.createElement('div');
-      meta.className = 'step-meta';
-      const sel = (step.candidates && step.candidates[0] && step.candidates[0].value) || '(structural)';
-      meta.innerHTML =
-        `${step.role}${step.text ? ' &middot; "' + escapeHtml(step.text) + '"' : ''} ` +
-        `&middot; <code>${escapeHtml(String(sel).slice(0, 50))}</code>` +
-        (step.sampleOptionText ? `<br>picked: "${escapeHtml(step.sampleOptionText)}"` : '');
-      const wrap = document.createElement('div');
-      wrap.className = 'step-item';
-      wrap.appendChild(select);
-      wrap.appendChild(meta);
-      li.appendChild(wrap);
-      list.appendChild(li);
+  function flashColField(mapKey) {
+    flashMapRow(mapKey);
+  }
+
+  function applyStepFormBinding(step) {
+    const mapKey = STEP_FIELD_TO_MAP[step._field];
+    if (!mapKey || !shouldRevealMappingField(mapKey, step)) return;
+
+    const val = fieldValueForMapping(step);
+    const blurReveal = step.blurred && val.length > 0;
+    const autocompleteReveal = step.role === ROLE.AUTOCOMPLETE && val.length > 0;
+    if (!blurReveal && !autocompleteReveal && !shouldRunFieldMapping(step)) return;
+
+    const wasRevealed = state.fieldRevealOrder.includes(mapKey);
+    const prev = state.formBindings[mapKey];
+    state.formBindings[mapKey] = step;
+
+    discoverField(mapKey);
+
+    const bindingChanged =
+      !prev ||
+      prev.stepId !== step.stepId ||
+      prev.sampleValue !== step.sampleValue ||
+      prev.text !== step.text;
+
+    if (!wasRevealed || bindingChanged || step.blurred) {
+      renderFormMapping();
+      if (mapKey === FIELD.PROCEDURE) flashColField(mapKey);
+      refreshLearnStepNav();
+    }
+  }
+
+  function inferColumnForField(mapKey, step) {
+    if (!state.parsed || !mapKey || !step) return null;
+    const preferredCol = PARSER.guessMapping(state.parsed.headers)[mapKey];
+    return inferColumnFromTypedValue(step, preferredCol, mapKey);
+  }
+
+  function columnOwnerField(col, exceptKey) {
+    if (!col) return null;
+    for (const [key, mapped] of Object.entries(state.mapping)) {
+      if (key === exceptKey) continue;
+      if (mapped === col) return key;
+    }
+    return null;
+  }
+
+  function setColumnMapping(mapKey, col, flash) {
+    if (!mapKey || !col) return;
+    const prevOwner = columnOwnerField(col, mapKey);
+    const stolen = Boolean(prevOwner);
+    if (stolen) delete state.mapping[prevOwner];
+
+    const changed = state.mapping[mapKey] !== col || stolen;
+    state.mapping[mapKey] = col;
+    if (mapKey !== FIELD.PROCEDURE) discoverField(mapKey);
+    renderFormMapping();
+    if (changed) {
+      if (flash) flashColField(mapKey);
+      rebuildEngineRows();
+    }
+    refreshLearnStepNav();
+  }
+
+  function inferAndSetColumnForField(mapKey, step) {
+    if (!mapKey || !shouldInferColumnMapping(mapKey, step)) return;
+    const col = inferColumnForField(mapKey, step);
+    if (!col) return;
+    const flash = Boolean(step?.blurred || step?.debounced) || state.mapping[mapKey] !== col;
+    setColumnMapping(mapKey, col, flash);
+  }
+
+  function wireColumnSelect(sel) {
+    if (!state.parsed) return;
+    const field = sel.dataset.colMap;
+    const prev = state.mapping[field];
+    sel.innerHTML = '';
+    const none = document.createElement('option');
+    none.value = '';
+    none.textContent = '(pick column)';
+    sel.appendChild(none);
+    state.parsed.headers.forEach((h) => {
+      const owner = columnOwnerField(h, field);
+      const o = document.createElement('option');
+      o.value = h;
+      o.textContent = owner ? `${h} (→ ${formLabelForKey(owner)})` : h;
+      sel.appendChild(o);
+    });
+    sel.value = prev || '';
+    sel.onchange = () => {
+      const v = sel.value;
+      if (!v) {
+        delete state.mapping[field];
+        rebuildEngineRows();
+        refreshLearnStepNav();
+        return;
+      }
+      setColumnMapping(field, v, true);
+    };
+  }
+
+  function mapFieldColHtml(key, label) {
+    if (key === FIELD.PROCEDURE) {
+      return (
+        `<div class="map-field-col-wrap map-field-col-mapped">` +
+        `<span class="map-field-check" title="Procedure input registered" aria-label="Procedure input registered">` +
+        `<span class="map-field-check-icon" aria-hidden="true">✓</span></span></div>`
+      );
+    }
+    return (
+      `<div class="map-field-col-wrap">` +
+      `<select class="select" data-col-map="${key}" aria-label="Spreadsheet column for ${label}">` +
+      `</select></div>`
+    );
+  }
+
+  function renderFormMapping() {
+    const loading = $('#mappingFieldLoading');
+    const list = $('#mappingFieldsList');
+    if (!list || !state.parsed) return;
+
+    const keys = state.fieldRevealOrder;
+    if (!keys.length) {
+      if (loading) loading.classList.remove('hidden');
+      list.classList.add('hidden');
+      list.innerHTML = '';
+      return;
+    }
+
+    if (loading) loading.classList.add('hidden');
+    list.classList.remove('hidden');
+
+    list.innerHTML = keys
+      .map((key) => {
+        const label = escapeHtml(formLabelForKey(key));
+        const def = FORM_FIELDS.find((f) => f.key === key);
+        const optional = def && !def.required;
+        const optTag = optional ? ' <span class="label-optional">optional</span>' : '';
+        return (
+          `<div class="map-field-row" data-form-field="${key}">` +
+          `<span class="map-field-form-label">${label}${optTag}</span>` +
+          mapFieldColHtml(key, label) +
+          `</div>`
+        );
+      })
+      .join('');
+
+    keys.forEach((key) => {
+      const sel = list.querySelector(`select[data-col-map="${key}"]`);
+      if (sel) wireColumnSelect(sel);
     });
   }
 
-  $('#btnSaveRecipe').addEventListener('click', async () => {
-    const steps = state.recordedSteps
-      .filter((s) => s._field)
-      .map((s) => {
-        let role = s.role;
-        if (s._field === FIELD.LOCATION) role = ROLE.STATIC;
-        else if (s._field === FIELD.CLICK) role = ROLE.CLICK;
-        return {
-          field: s._field,
-          role,
-          candidates: s.candidates || [],
-          optionSelector: s.optionSelector,
-          clickRel: s.clickRel,
-          staticValue: s._field === FIELD.LOCATION ? 'IMC' : undefined
-        };
-      });
-    if (!steps.length) {
-      toast('Label at least one step before saving.');
+  function inferColumnFromTypedValue(step, preferredCol, mapKey) {
+    if (!state.parsed) return null;
+    const typed = fieldValueForMapping(step);
+    const minLen = mapKey
+      ? minColumnInferLenForFieldKey(mapKey)
+      : minMappingLenFromHaystack(`${step.text || ''} ${typed}`);
+    if (!typed || typed.length < minLen) return null;
+
+    const rows = state.parsed.rows.slice(0, 100);
+    const matches = state.parsed.headers.filter((h) =>
+      rows.some((row) => valueMatchesCell(row[h], typed))
+    );
+    if (!matches.length) return null;
+
+    const nKey = normalizeMatchKey(typed);
+    if (nKey.length < MIN_VALUE_MATCH_SUBSTRING_LEN && matches.length > 1) {
+      return pickPreferredColumnMatch(matches, preferredCol);
+    }
+    if (nKey.length < MIN_VALUE_MATCH_SUBSTRING_LEN) return matches[0];
+
+    return pickPreferredColumnMatch(matches, preferredCol);
+  }
+
+  function applyStepColumnMatch(step) {
+    const mapKey = STEP_FIELD_TO_MAP[step._field];
+    inferAndSetColumnForField(mapKey, step);
+  }
+
+  function inferMappingFromLearn() {
+    if (!state.parsed || !state.recordedSteps.length) return;
+    for (const step of state.recordedSteps) {
+      if (!step._field) step._field = autoGuessField(step);
+      applyStepColumnMatch(step);
+    }
+  }
+
+  function isSupervisorSearchTabLearnStep(s) {
+    if (s.role !== ROLE.CLICK || s._field !== FIELD.CLICK) return false;
+    return (s.candidates || []).some((c) => /supTabSearch/i.test(String(c.value || '')));
+  }
+
+  function stepToRecipeStep(s) {
+    let role = s.role || ROLE.INPUT;
+    if (s._field === FIELD.LOCATION) role = ROLE.STATIC;
+    else if (s._field === FIELD.CLICK) role = ROLE.CLICK;
+    return {
+      field: s._field,
+      role,
+      candidates: s.candidates || [],
+      optionSelector: s.optionSelector,
+      clickRel: s.clickRel,
+      staticValue: s._field === FIELD.LOCATION ? (s.staticValue || 'IMC') : undefined
+    };
+  }
+
+  async function saveRecipeFromSteps() {
+    const recorded = state.recordedSteps.filter((s) => s._field);
+    if (!recorded.length) {
+      toast('Document one procedure on the form first — that teaches us where each field lives.');
       return;
     }
+    const steps = recorded.filter((s) => !isSupervisorSearchTabLearnStep(s)).map(stepToRecipeStep);
     const tab = await getActiveTab();
     const recipe = {
       version: 1,
@@ -280,11 +656,11 @@
     };
     await chrome.storage.local.set({ [STORAGE_KEYS.RECIPE]: recipe });
     state.recipe = recipe;
-    $('#learnSteps').classList.add('hidden');
     renderRecipeStatus();
+    state.maxTabIndex = Math.max(state.maxTabIndex, TAB_ORDER.indexOf('run'));
+    refreshTabLocks();
     refreshRunReadiness();
-    toast('Recipe saved.');
-  });
+  }
 
   $('#btnViewRecipe').addEventListener('click', () => {
     const pre = $('#recipeJson');
@@ -295,18 +671,31 @@
   $('#btnClearRecipe').addEventListener('click', async () => {
     await chrome.storage.local.remove(STORAGE_KEYS.RECIPE);
     state.recipe = null;
+    state.maxTabIndex = state.parsed ? 1 : 0;
+    if (TAB_ORDER.indexOf(getActiveTabName()) > state.maxTabIndex) {
+      switchTab(state.maxTabIndex === 0 ? 'data' : 'mapping');
+    }
+    refreshTabLocks();
     renderRecipeStatus();
     refreshRunReadiness();
     toast('Recipe cleared.');
   });
 
+  function getActiveTabName() {
+    const active = $('.tab-trigger.active');
+    return active ? active.dataset.tab : 'data';
+  }
+
   function renderRecipeStatus() {
     const el = $('#recipeStatus');
+    if (!el) return;
     if (state.recipe) {
+      el.classList.remove('hidden');
       const fields = state.recipe.steps.map((s) => s.field).join(', ');
       el.innerHTML = `<span class="badge-secondary">Recipe saved</span> ${state.recipe.steps.length} steps: <strong>${escapeHtml(fields)}</strong>`;
     } else {
-      el.innerHTML = '<span class="text-muted-foreground">No recipe saved yet.</span>';
+      el.classList.add('hidden');
+      el.innerHTML = '';
     }
   }
 
@@ -335,78 +724,76 @@
     if (fileInput.files[0]) handleFile(fileInput.files[0]);
   });
 
+  function showDataUploadUI() {
+    $('#uploadArea').classList.remove('hidden');
+    $('#dropzone').classList.remove('hidden');
+    $('#fileLoadedBar').classList.add('hidden');
+    $('#fileInfo').textContent = '';
+    refreshLearnMappingVisibility();
+  }
+
+  function showDataLoadedUI(fileName, rowCount, colCount) {
+    $('#uploadArea').classList.add('hidden');
+    $('#fileLoadedBar').classList.remove('hidden');
+    $('#fileLoadedName').textContent = fileName;
+    $('#fileLoadedMeta').textContent = `${rowCount} rows, ${colCount} columns`;
+  }
+
+  function clearLoadedFile() {
+    stopLearnRecording();
+    state.parsed = null;
+    state.mapping = {};
+    state.formBindings = {};
+    state.engineRows = [];
+    state.recordedSteps = [];
+    state.fieldRevealOrder = [];
+    state.maxTabIndex = 0;
+    fileInput.value = '';
+    showDataUploadUI();
+    refreshTabLocks();
+    refreshDataStepNav();
+    refreshLearnReadiness();
+    refreshRunReadiness();
+    switchTab('data');
+  }
+
+  $('#btnClearFile').addEventListener('click', clearLoadedFile);
+
   async function handleFile(file) {
+    $('#fileInfo').textContent = '';
+    $('#fileLoadedName').textContent = file.name;
+    $('#fileLoadedMeta').textContent = 'Reading…';
+    $('#uploadArea').classList.add('hidden');
+    $('#fileLoadedBar').classList.remove('hidden');
     try {
-      $('#fileInfo').textContent = `Reading ${file.name}...`;
       const parsed = await PARSER.readFile(file);
       state.parsed = parsed;
-      state.mapping = PARSER.guessMapping(parsed.headers);
-      $('#fileInfo').innerHTML = `Loaded <b>${escapeHtml(file.name)}</b> &middot; ${parsed.rows.length} rows, ${parsed.headers.length} columns`;
-      $('#mappingBox').classList.remove('hidden');
-      $('#btnGoLearn').classList.remove('hidden');
-      renderMapping();
-      rebuildEngineRows();
+      state.mapping = {};
+    state.formBindings = {};
+    state.recordedSteps = [];
+    state.fieldRevealOrder = [];
+      showDataLoadedUI(file.name, parsed.rows.length, parsed.headers.length);
+      refreshDataStepNav();
       refreshLearnReadiness();
-      toast('Spreadsheet loaded. Review mapping, then continue to Learn.');
+      refreshLearnMappingVisibility();
     } catch (err) {
+      showDataUploadUI();
       $('#fileInfo').textContent = `Could not read file: ${err.message}`;
     }
   }
 
-  function renderMapping() {
-    $$('select[data-map]').forEach((sel) => {
-      const field = sel.dataset.map;
-      sel.innerHTML = '';
-      const none = document.createElement('option');
-      none.value = '';
-      none.textContent = '(none)';
-      sel.appendChild(none);
-      state.parsed.headers.forEach((h) => {
-        const o = document.createElement('option');
-        o.value = h;
-        o.textContent = h;
-        if (state.mapping[field] === h) o.selected = true;
-        sel.appendChild(o);
-      });
-      sel.onchange = () => {
-        state.mapping[field] = sel.value || undefined;
-        rebuildEngineRows();
-      };
-    });
-  }
-
-  $('#groupProcedures').addEventListener('change', rebuildEngineRows);
-
   function rebuildEngineRows() {
     if (!state.parsed) return;
-    state.engineRows = PARSER.buildEngineRows(state.parsed, state.mapping, {
-      groupProcedures: $('#groupProcedures').checked,
-      location: 'IMC'
-    });
-    renderPreview();
+    state.engineRows = PARSER.buildEngineRows(state.parsed, state.mapping, { location: 'IMC' });
     refreshRunReadiness();
-    autoMapFromData();
-  }
-
-  function renderPreview() {
-    const rows = state.engineRows.slice(0, 50);
-    $('#rowCount').textContent = `(${state.engineRows.length} entries)`;
-    const head = '<tr><th>Date</th><th>Supervisor</th><th>MRN</th><th>Procedures</th></tr>';
-    const body = rows
-      .map(
-        (r) =>
-          `<tr><td>${escapeHtml(r.date)}</td><td>${escapeHtml(r.supervisor)}</td>` +
-          `<td>${escapeHtml(r.mrn)}</td><td>${escapeHtml(r.procedures.join(', '))}</td></tr>`
-      )
-      .join('');
-    $('#preview').innerHTML = `<table><thead>${head}</thead><tbody>${body}</tbody></table>`;
+    refreshLearnStepNav();
   }
 
   // ================= RUN =================
   function refreshRunReadiness() {
     const el = $('#runReadiness');
     const issues = [];
-    if (!state.recipe) issues.push('no recipe (do step 2 — Learn)');
+    if (!state.recipe) issues.push('no recipe (do step 2 — Mapping)');
     if (!hasData()) issues.push('no data loaded (do step 1 — Data)');
     if (issues.length) {
       el.innerHTML = `<span class="badge-outline border-amber-500/50 text-amber-400">Not ready</span> ${issues.join(' and ')}.`;
@@ -445,6 +832,7 @@
 
     state.running = true;
     state.session = { startedAt: new Date().toISOString(), dryRun, rows: [] };
+    state.reportFilter = 'all';
     $('#liveLog').innerHTML = '';
     $('#progressWrap').classList.remove('hidden');
     $('#btnRun').classList.add('hidden');
@@ -457,6 +845,20 @@
         break;
       }
       const row = state.engineRows[i];
+      const missing = missingRequiredValuesForRow(row);
+      if (missing.length) {
+        const label = `Row ${i + 1}/${state.engineRows.length} (MRN ${row.mrn || 'n/a'})`;
+        const msg = `${label}: no value for ${missing.join(', ')} — enter manually or fix your file.`;
+        toast(msg);
+        logLine(msg, 'failed');
+        state.session.rows.push({
+          index: i,
+          mrn: row.mrn,
+          result: { ok: false, actions: [], skipped: true, missingFields: missing }
+        });
+        updateProgress(i + 1, state.engineRows.length);
+        continue;
+      }
       logLine(`Row ${i + 1}/${state.engineRows.length} - MRN ${row.mrn || 'n/a'}`, 'info');
       const result = await runOneRow(row, i, state.engineRows.length, dryRun, fieldDelayMs);
       state.session.rows.push({ index: i, mrn: row.mrn, result: result.result });
@@ -472,6 +874,8 @@
     $('#btnRun').classList.remove('hidden');
     $('#btnStop').classList.add('hidden');
     renderReport();
+    state.maxTabIndex = Math.max(state.maxTabIndex, TAB_ORDER.indexOf('report'));
+    refreshTabLocks();
     logLine('Session complete. See Report tab.', 'info');
     toast('Session complete - see Report tab.');
   }
@@ -513,17 +917,52 @@
   }
 
   // ================= REPORT =================
+  function renderReportSummaryHtml(s, activeFilter) {
+    const chip = (filter, label, count, tone) => {
+      const active = activeFilter === filter ? ' is-active' : '';
+      return (
+        `<button type="button" class="report-filter report-filter-${tone}${active}" data-report-filter="${filter}" aria-pressed="${activeFilter === filter}">` +
+        `<span class="report-filter-count">${count}</span> ${label}</button>`
+      );
+    };
+    return (
+      `${s.dryRun ? '<span class="badge-outline mr-1">DRY RUN</span>' : ''}` +
+      chip('all', 'total', s.total, 'neutral') +
+      chip('success', 'ok', s.succeeded, 'success') +
+      chip('failed', 'failed', s.failed, 'failed') +
+      chip('stopped', 'stopped', s.skipped, 'stopped')
+    );
+  }
+
+  function wireReportFilters() {
+    const onFilterClick = (e) => {
+      const el = e.target.closest('[data-report-filter]');
+      if (!el || !$('#reportPreview').contains(el)) return;
+      e.preventDefault();
+      const filter = el.getAttribute('data-report-filter');
+      if (!filter || filter === state.reportFilter) return;
+      state.reportFilter = filter;
+      renderReport();
+    };
+    const preview = $('#reportPreview');
+    if (!preview) return;
+    preview.removeEventListener('click', preview._reportFilterClick);
+    preview._reportFilterClick = onFilterClick;
+    preview.addEventListener('click', onFilterClick);
+  }
+
   function renderReport() {
     if (!state.session) return;
     const s = REPORT.summarize(state.session);
-    $('#reportSummary').innerHTML =
-      `${s.dryRun ? '<span class="badge-outline mr-1">DRY RUN</span>' : ''}` +
-      `<span class="badge-secondary mr-1">Total ${s.total}</span> ` +
-      `<span class="text-emerald-500">${s.succeeded} ok</span> · ` +
-      `<span class="text-destructive">${s.failed} failed</span> · ${s.skipped} stopped`;
-    $('#reportBody').innerHTML = REPORT.toHTML(state.session)
+    $('#reportSummary').innerHTML = renderReportSummaryHtml(s, state.reportFilter);
+    $('#reportBody').innerHTML = REPORT.toHTML(state.session, { filter: state.reportFilter })
       .replace(/^[\s\S]*<body>/, '')
       .replace(/<\/body>[\s\S]*$/, '');
+    $('#reportBody').querySelectorAll('.card-filter').forEach((card) => {
+      const f = card.getAttribute('data-report-filter');
+      card.classList.toggle('is-active', f === state.reportFilter);
+    });
+    wireReportFilters();
   }
 
   $('#btnExportHtml').addEventListener('click', () => {
@@ -554,7 +993,11 @@
 
   function kanyeImageUrl(filename) {
     if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
-      return chrome.runtime.getURL('assets/kanye/' + filename);
+      const url = chrome.runtime.getURL('assets/kanye/' + filename);
+      if (url.startsWith('chrome-extension://')) return url;
+    }
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.id) {
+      return '../assets/kanye/' + filename;
     }
     // Demo panel (demo/panel.html)
     return '../extension/assets/kanye/' + filename;
@@ -564,10 +1007,17 @@
     const img = $('#kanyePortrait');
     const list = window.FAA_KANYE_IMAGES;
     if (!img || !list || !list.length) return;
+
+    const reveal = () => img.classList.add('is-loaded');
     const pick = list[Math.floor(Math.random() * list.length)];
-    img.onload = () => img.classList.remove('hidden');
-    img.onerror = () => img.classList.add('hidden');
-    img.src = kanyeImageUrl(pick);
+    const url = kanyeImageUrl(pick);
+
+    img.onload = reveal;
+    img.onerror = () => img.classList.remove('is-loaded');
+    img.classList.remove('is-loaded');
+    img.src = url;
+
+    if (img.complete && img.naturalWidth > 0) reveal();
   }
 
   // ---- init ----
@@ -577,8 +1027,12 @@
       tagline.textContent = window.FAA_randomQuote();
     }
     setRandomKanyePortrait();
+    refreshDataStepNav();
+    refreshLearnMappingVisibility();
     const stored = await chrome.storage.local.get(STORAGE_KEYS.RECIPE);
     state.recipe = stored[STORAGE_KEYS.RECIPE] || null;
+    if (state.recipe) state.maxTabIndex = TAB_ORDER.indexOf('run');
+    refreshTabLocks();
     renderRecipeStatus();
     refreshLearnReadiness();
     refreshRunReadiness();
