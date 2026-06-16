@@ -31,7 +31,7 @@ and can be pointed at other forms too.
 7. [Spreadsheet format](#spreadsheet-format)
 8. [Troubleshooting](#troubleshooting)
 9. [Privacy & security](#privacy--security)
-10. [How it works (for developers)](#how-it-works-for-developers)
+10. [Project Structure](#project-structure)
 
 ---
 
@@ -265,51 +265,38 @@ Location is **not** read from the spreadsheet — it is always `IMC`.
 
 ---
 
-## How it works (for developers)
+## Project Structure
 
 ```
-extension/
-├── manifest.json            MV3 manifest
-├── background.js            Opens side panel; relays content→panel messages
-├── common/
-│   ├── messages.js          Shared message/role/field constants
-│   └── dom-utils.js         Resilient selector generation + element resolution
-├── content/
-│   ├── recorder.js          Learn mode: captures steps, detects autocompletes
-│   ├── engine.js            Replay: fills fields, autocomplete, submit, logging
-│   ├── overlay.js           In-page status badge + highlight box
-│   └── content.js           Message bridge (panel ↔ recorder/engine/overlay)
-├── sidepanel/
-│   ├── sidepanel.html/.css  Three-step UI + report
-│   ├── sidepanel.js         Controller / run loop
-│   ├── parser.js            SheetJS wrapper + Slicer Dicer cleanup + mapping
-│   └── report.js            Audit log → HTML/CSV/JSON
-├── vendor/xlsx.full.min.js  SheetJS (spreadsheet parsing)
-├── samples/                 Example spreadsheet
-└── test/parser.test.js      Node smoke test for parser + report
+auto-mate/
+├── extension/                 Chrome MV3 extension — load this folder unpacked
+│   ├── manifest.json          Extension manifest
+│   ├── background.js          Side panel + message relay
+│   ├── common/
+│   │   ├── messages.js        Shared message/role/field constants
+│   │   └── dom-utils.js       Selector generation + element resolution
+│   ├── content/
+│   │   ├── recorder.js        Learn mode: capture steps + autocompletes
+│   │   ├── engine.js          Replay: fill fields, submit, audit logging
+│   │   ├── overlay.js         In-page status badge + highlights
+│   │   └── content.js         Message bridge (panel ↔ page)
+│   ├── sidepanel/
+│   │   ├── sidepanel.html     Side panel UI
+│   │   ├── input.css          Tailwind/shadcn source styles
+│   │   ├── sidepanel.css      Compiled styles (from npm run build:css)
+│   │   ├── sidepanel.js       Controller / run loop
+│   │   ├── parser.js          Spreadsheet parsing + Slicer Dicer cleanup
+│   │   └── report.js          Session report → HTML / CSV / JSON
+│   ├── vendor/xlsx.full.min.js
+│   ├── samples/               Example Slicer Dicer export
+│   └── test/                  jsdom test suites + MedHub HTML fixtures
+├── demo/                      Local UX harness (no extension install)
+│   ├── demo.html              Mock MedHub form + panel iframe
+│   ├── panel.html             Side panel with chrome shim
+│   └── drive.js               Headless workflow smoke test
+├── package.json               npm test, build:css, dev:css
+└── README.md
 ```
-
-**Recipe shape** (saved to `chrome.storage.local`):
-
-```json
-{
-  "version": 1,
-  "url": "https://...",
-  "procedureRepeatable": true,
-  "steps": [
-    { "field": "date", "role": "input", "candidates": [{ "type": "css", "value": "#date" }] },
-    { "field": "location", "role": "static", "staticValue": "IMC", "candidates": [/* ... */] },
-    { "field": "supervisor", "role": "autocomplete", "optionSelector": "[role=\"option\"]", "candidates": [/* ... */] },
-    { "field": "mrn", "role": "input", "candidates": [/* ... */] },
-    { "field": "procedure", "role": "autocomplete", "optionSelector": "li.result", "candidates": [/* ... */] },
-    { "field": "submit", "role": "submit", "candidates": [/* ... */] }
-  ]
-}
-```
-
-Each field stores **multiple candidate selectors** (id → name → aria-label →
-data-* → placeholder → label text → structural path). On replay the engine
-tries them in order, so a single brittle selector never breaks a run.
 
 ### Tests
 
@@ -326,9 +313,9 @@ npm test
 
 Fixtures live in [`extension/test/fixtures/`](extension/test/fixtures/):
 
-- `medhub-home.html` — the client's MedHub home page (confirms platform/nav).
-- `medhub-procedure-form.html` — a synthetic MedHub *Add Procedure* form with a
-  jQuery-style autocomplete, used to exercise record + replay end to end.
+- `medhub-home.html` — MedHub home page (platform/nav reference).
+- `medhub-procedure-log.html` — realistic Procedures form (tabs, filter+add list, Log Procedure).
+- `medhub-procedure-form.html` — simpler autocomplete fixture (legacy smoke tests).
 
 > Note: the client's saved HTML was the MedHub **home page** (Safari flattens it
 > into styled text), so it does not contain the live procedure form's inputs.
