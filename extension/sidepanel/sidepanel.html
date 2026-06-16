@@ -8,9 +8,12 @@
   </head>
   <body class="min-h-screen">
     <header class="border-b px-4 py-4">
-      <div class="flex flex-col gap-0.5">
-        <h1 class="text-lg font-semibold tracking-tight">auto&#8209;mate</h1>
-        <p id="tagline" class="text-xs text-muted-foreground italic"></p>
+      <div class="flex items-start justify-between gap-3">
+        <div class="flex min-w-0 flex-1 flex-col gap-0.5">
+          <h1 class="text-lg font-semibold tracking-tight">auto&#8209;mate</h1>
+          <p id="tagline" class="text-xs text-muted-foreground italic"></p>
+        </div>
+        <img id="kanyePortrait" class="kanye-portrait hidden" alt="" width="56" height="56" />
       </div>
     </header>
 
@@ -161,6 +164,7 @@
 
     <script src="../common/messages.js"></script>
     <script src="quotes.js"></script>
+    <script src="kanye-images.js"></script>
     <script src="../vendor/xlsx.full.min.js"></script>
     <script src="parser.js"></script>
     <script src="report.js"></script>

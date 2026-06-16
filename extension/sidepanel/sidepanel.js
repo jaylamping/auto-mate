@@ -552,12 +552,31 @@
       .replace(/"/g, '&quot;');
   }
 
+  function kanyeImageUrl(filename) {
+    if (typeof chrome !== 'undefined' && chrome.runtime && chrome.runtime.getURL) {
+      return chrome.runtime.getURL('assets/kanye/' + filename);
+    }
+    // Demo panel (demo/panel.html)
+    return '../extension/assets/kanye/' + filename;
+  }
+
+  function setRandomKanyePortrait() {
+    const img = $('#kanyePortrait');
+    const list = window.FAA_KANYE_IMAGES;
+    if (!img || !list || !list.length) return;
+    const pick = list[Math.floor(Math.random() * list.length)];
+    img.onload = () => img.classList.remove('hidden');
+    img.onerror = () => img.classList.add('hidden');
+    img.src = kanyeImageUrl(pick);
+  }
+
   // ---- init ----
   (async function init() {
     const tagline = $('#tagline');
     if (tagline && typeof window.FAA_randomQuote === 'function') {
       tagline.textContent = window.FAA_randomQuote();
     }
+    setRandomKanyePortrait();
     const stored = await chrome.storage.local.get(STORAGE_KEYS.RECIPE);
     state.recipe = stored[STORAGE_KEYS.RECIPE] || null;
     renderRecipeStatus();

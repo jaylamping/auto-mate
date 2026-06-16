@@ -162,6 +162,10 @@
     @apply rounded bg-muted px-1 py-0.5 font-mono text-[10px] text-foreground;
   }
 
+  .kanye-portrait {
+    @apply h-14 w-14 shrink-0 rounded-md border border-border object-cover object-center shadow-sm;
+  }
+
   /* Step list item */
   .step-item {
     @apply card p-3 space-y-2;

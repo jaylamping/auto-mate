@@ -279,6 +279,7 @@ auto-mate/
 │   │   ├── sidepanel.js       Controller / run loop
 │   │   ├── parser.js          Spreadsheet parsing + Slicer Dicer cleanup
 │   │   └── report.js          Session report → HTML / CSV / JSON
+│   ├── assets/kanye/          Portrait images (random one shown in panel header)
 │   ├── vendor/xlsx.full.min.js
 │   ├── samples/               Example Slicer Dicer export
 │   └── test/                  jsdom test suites + MedHub HTML fixtures
