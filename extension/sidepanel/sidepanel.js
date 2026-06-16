@@ -140,19 +140,47 @@
     { value: FIELD.SUPERVISOR, label: 'Supervisor' },
     { value: FIELD.MRN, label: 'Patient MRN' },
     { value: FIELD.PROCEDURE, label: 'Procedure' },
+    { value: FIELD.CLICK, label: 'Click / navigation (keep)' },
     { value: FIELD.SUBMIT, label: 'Submit' }
   ];
 
+  // Heuristic auto-labeling. Combined with value-matching against the loaded
+  // spreadsheet (see autoMapFromData), this means the user usually only needs
+  // to glance at the inferred mapping and click Save - no manual labeling.
   function autoGuessField(step) {
     const hay = `${step.text || ''} ${step.sampleValue || ''}`.toLowerCase();
     if (step.role === ROLE.SUBMIT) return FIELD.SUBMIT;
+    if (step.role === ROLE.CLICK) return FIELD.CLICK; // keep nav clicks (e.g. Search tab)
     if (/date|dos/.test(hay)) return FIELD.DATE;
     if (/location|site|facility/.test(hay)) return FIELD.LOCATION;
     if (/supervis|attending|precept/.test(hay)) return FIELD.SUPERVISOR;
-    if (/mrn|patient|record/.test(hay)) return FIELD.MRN;
+    if (/encounter|mrn|patient|record/.test(hay)) return FIELD.MRN;
     if (/procedure|cpt/.test(hay)) return FIELD.PROCEDURE;
     if (step.role === ROLE.AUTOCOMPLETE) return FIELD.PROCEDURE;
     return '';
+  }
+
+  // If a spreadsheet is already loaded, refine guesses by matching what the
+  // user typed during Learn against the first data row's columns.
+  function autoMapFromData() {
+    if (!state.parsed || !state.engineRows.length) return;
+    const sample = state.engineRows[0];
+    const candidates = {
+      [FIELD.DATE]: [sample.date],
+      [FIELD.SUPERVISOR]: [sample.supervisor],
+      [FIELD.MRN]: [sample.mrn],
+      [FIELD.PROCEDURE]: sample.procedures || []
+    };
+    for (const step of state.recordedSteps) {
+      const typed = String(step.sampleValue == null ? '' : step.sampleValue).trim().toLowerCase();
+      if (!typed) continue;
+      for (const [field, vals] of Object.entries(candidates)) {
+        if (vals.some((v) => v && String(v).trim().toLowerCase().startsWith(typed.slice(0, 6)) && typed.length >= 2)) {
+          step._field = field;
+        }
+      }
+    }
+    renderSteps();
   }
 
   function renderSteps() {
@@ -192,13 +220,19 @@
   $('#btnSaveRecipe').addEventListener('click', async () => {
     const steps = state.recordedSteps
       .filter((s) => s._field)
-      .map((s) => ({
-        field: s._field,
-        role: s._field === FIELD.LOCATION ? ROLE.STATIC : s.role,
-        candidates: s.candidates || [],
-        optionSelector: s.optionSelector,
-        staticValue: s._field === FIELD.LOCATION ? 'IMC' : undefined
-      }));
+      .map((s) => {
+        let role = s.role;
+        if (s._field === FIELD.LOCATION) role = ROLE.STATIC;
+        else if (s._field === FIELD.CLICK) role = ROLE.CLICK;
+        return {
+          field: s._field,
+          role,
+          candidates: s.candidates || [],
+          optionSelector: s.optionSelector,
+          clickRel: s.clickRel,
+          staticValue: s._field === FIELD.LOCATION ? 'IMC' : undefined
+        };
+      });
     if (!steps.length) {
       toast('Label at least one step before saving.');
       return;
@@ -315,6 +349,7 @@
     });
     renderPreview();
     refreshRunReadiness();
+    autoMapFromData();
   }
 
   function renderPreview() {

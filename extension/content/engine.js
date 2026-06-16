@@ -105,12 +105,22 @@
       throw new Error(`No good match for "${query}" (best option: "${best ? best.textContent.trim().slice(0, 60) : 'none'}")`);
     }
     const chosenText = best.textContent.trim();
+    // Some forms (e.g. MedHub's procedure list) require clicking a control
+    // *inside* the matched row (a "+" add link) rather than the row text. If a
+    // relative click target was recorded, use it; otherwise click the match.
+    let clickTarget = best;
+    if (opts.clickRel) {
+      try {
+        const inner = best.querySelector(opts.clickRel);
+        if (inner) clickTarget = inner;
+      } catch (_) {}
+    }
     try {
-      if (typeof best.scrollIntoView === 'function') best.scrollIntoView({ block: 'center' });
+      if (typeof clickTarget.scrollIntoView === 'function') clickTarget.scrollIntoView({ block: 'center' });
     } catch (_) {
       /* not implemented in headless DOM */
     }
-    best.click();
+    clickTarget.click();
     await sleep(150);
     return chosenText;
   }
@@ -165,9 +175,17 @@
           return { ok: false, actions, failedField: step.field };
         }
 
-        if (step.role === ROLE.STATIC) {
+        if (step.role === ROLE.CLICK) {
+          // Navigation / UI click recorded during Learn (e.g. a tab switch).
+          // No spreadsheet value; just reproduce the click in order.
+          el.click();
+          record({ field: step.field, role: step.role, outcome: 'success', detail: 'clicked' });
+        } else if (step.role === ROLE.STATIC) {
           const v = step.staticValue != null ? step.staticValue : valueForField(step.field, row);
-          if (DOM.resolveElement(step.candidates)) {
+          if (el.tagName.toLowerCase() === 'select') {
+            setNativeValue(el, String(v));
+            fireInput(el);
+          } else {
             await typeInto(el, v);
           }
           record({ field: step.field, role: step.role, value: v, outcome: 'success' });
@@ -196,7 +214,7 @@
                 return { ok: false, actions, failedField: step.field };
               }
               try {
-                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, proc, acOpts);
+                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, proc, { ...acOpts, clickRel: step.clickRel });
                 record({ field: step.field, role: step.role, value: proc, chosen, outcome: 'success' });
               } catch (err) {
                 record({ field: step.field, role: step.role, value: proc, outcome: 'failed', detail: err.message });
@@ -206,7 +224,7 @@
             }
           } else {
             const v = valueForField(step.field, row);
-            const chosen = await selectFromAutocomplete(el, step.optionSelector, v, acOpts);
+            const chosen = await selectFromAutocomplete(el, step.optionSelector, v, { ...acOpts, clickRel: step.clickRel });
             record({ field: step.field, role: step.role, value: v, chosen, outcome: 'success' });
           }
         } else if (step.role === ROLE.SUBMIT) {

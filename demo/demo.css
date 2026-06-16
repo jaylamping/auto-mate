@@ -39,3 +39,24 @@ body { margin: 0; font: 14px/1.5 system-ui, sans-serif; background: #0b1220; col
 }
 .saved-note { margin-top: 10px; color: #15803d; font-weight: 600; }
 .hidden { display: none !important; }
+
+.form-pane h2 { font-size: 15px; margin: 20px 20px 6px; padding: 6px 0; border-bottom: 2px solid #c7b8e6; color: #4b3b78; max-width: 560px; }
+.form-pane h3 { font-size: 13px; margin: 0 0 8px; color: #fff; background: #2563a8; padding: 8px 12px; }
+.field-label { display: block; font-weight: 600; margin-bottom: 4px; font-size: 13px; }
+.field select { padding: 7px 8px; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 14px; }
+.field .note { color: #64748b; font-size: 12px; margin-left: 8px; }
+.sup-tabs { display: flex; gap: 2px; margin-bottom: 6px; }
+.sup-tabs .tab { padding: 6px 14px; text-decoration: underline; color: #1d4ed8; font-size: 13px; }
+.sup-tabs .tab.active { font-weight: 700; }
+#supListPane, #supSearchPane { border: 1px solid #e2e8f0; padding: 10px; border-radius: 6px; }
+.add-standard { max-width: 560px; margin: 0 20px; border: 1px solid #2563a8; border-radius: 6px; overflow: hidden; }
+.add-standard #procSearch { width: calc(100% - 24px); margin: 10px 12px; padding: 8px; border: 1px solid #cbd5e1; border-radius: 6px; }
+#procList { list-style: none; margin: 0; padding: 0; max-height: 220px; overflow: auto; }
+.proc_row { display: flex; align-items: center; gap: 10px; padding: 8px 12px; border-top: 1px solid #eef2f7; }
+.proc_row .add { display: inline-flex; width: 22px; height: 22px; align-items: center; justify-content: center; background: #e0f2fe; color: #0369a1; border-radius: 5px; text-decoration: none; font-weight: 700; }
+.proc_row .cpt { color: #94a3b8; width: 24px; }
+#selectedProcs { width: calc(100% - 40px); margin: 8px 20px; border-collapse: collapse; }
+#selectedProcs td { border: 1px solid #e2e8f0; padding: 6px 8px; font-size: 13px; }
+.add-standard, #selectedProcs, #procSearch { box-sizing: border-box; }
+textarea#procNotes { width: 100%; min-height: 70px; border: 1px solid #cbd5e1; border-radius: 6px; padding: 8px; }
+.inline { margin-left: 10px; font-size: 13px; }

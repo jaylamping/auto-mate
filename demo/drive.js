@@ -36,19 +36,21 @@ async function main() {
 
   await page.screenshot({ path: path.join(OUT, '01-initial.png') });
 
-  // --- Learn mode ---
+  // --- Learn mode (mirrors the real MedHub flow) ---
   await panel.click('#btnStartLearn');
   await sleep(150);
-  await page.type('#proc_date', '01/05/2026', { delay: 8 });
-  await page.type('#proc_location', 'IMC', { delay: 8 });
-  await page.type('#sup_search', 'Smith, John', { delay: 12 });
+  await page.type('#procedureDate', '06/15/2026', { delay: 8 });
+  await page.type('#locationSpecify', 'IMC', { delay: 8 });
+  await page.click('#supTabSearch'); // navigation: reveal the Search pane
+  await sleep(60);
+  await page.type('#supSearch', 'Smith, John', { delay: 12 });
   await sleep(120);
-  await page.click('#sup_results li.ac_item');
-  await page.type('#patient_mrn', '000123456', { delay: 8 });
-  await page.type('#proc_search', 'Colonoscopy', { delay: 12 });
+  await page.click('#supResults li.sup_result');
+  await page.type('#encounterText', '000123456', { delay: 8 });
+  await page.type('#procSearch', 'Colonoscopy', { delay: 12 });
   await sleep(120);
-  await page.click('#proc_results li.ac_item');
-  await page.click('#submitBtn');
+  await page.click('#procList .proc_row[data-name="Colonoscopy"] a.add');
+  await page.click('#logProcedure');
   await sleep(150);
   await panel.click('#btnFinishLearn');
   await sleep(200);
@@ -72,14 +74,19 @@ async function main() {
   // --- Run (dry run) ---
   await panel.click('.tab[data-tab="run"]');
   await sleep(100);
+  await panel.$eval('#fieldDelay', (el) => {
+    el.value = '0';
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+  });
   await panel.click('#btnRun');
-  // Wait for the run to finish (button toggles back).
-  for (let i = 0; i < 60; i++) {
-    const running = await panel.$eval('#btnStop', (el) => !el.classList.contains('hidden')).catch(() => false);
-    if (!running && i > 2) break;
+  // Wait until the live log reports the session is complete.
+  let done = false;
+  for (let i = 0; i < 80 && !done; i++) {
     await sleep(300);
+    done = await panel
+      .$eval('#liveLog', (el) => /Session complete/.test(el.textContent))
+      .catch(() => false);
   }
-  await sleep(300);
   await page.screenshot({ path: path.join(OUT, '04-run-log.png') });
 
   // --- Report ---
@@ -91,11 +98,11 @@ async function main() {
 
   // Validate the mock form actually got filled on the last processed row.
   const formState = await page.evaluate(() => ({
-    date: document.getElementById('proc_date').value,
-    location: document.getElementById('proc_location').value,
-    supervisor: document.getElementById('sup_search').value,
-    mrn: document.getElementById('patient_mrn').value,
-    procedures: Array.from(document.querySelectorAll('#selected_procedures .proc_chip')).map((c) => c.textContent)
+    date: document.getElementById('procedureDate').value,
+    location: document.getElementById('locationSpecify').value,
+    supervisor: document.getElementById('supSearch').value,
+    mrn: document.getElementById('encounterText').value,
+    procedures: Array.from(document.querySelectorAll('#selectedProcs .selected_proc')).map((tr) => tr.children[1].textContent)
   }));
   console.log('  final form state:', JSON.stringify(formState));
 

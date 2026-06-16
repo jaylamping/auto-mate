@@ -40,7 +40,55 @@
     }
     if (tag === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'submit') return true;
     const text = (el.textContent || '').trim().toLowerCase();
-    return /\b(submit|save|accept|sign|file|done|finish)\b/.test(text);
+    // "Log Procedure" is MedHub's submit button.
+    return /\b(submit|save|accept|sign|file|done|finish|log)\b/.test(text);
+  }
+
+  // Whether a clicked element looks like an autocomplete/list option (so a
+  // click after typing is a selection) vs. ordinary navigation (e.g. a tab).
+  function isOptionLike(el) {
+    let node = el;
+    for (let i = 0; i < 5 && node && node.nodeType === 1; i++) {
+      const role = node.getAttribute && node.getAttribute('role');
+      const tag = node.tagName.toLowerCase();
+      if (role === 'option' || tag === 'li' || tag === 'tr') return true;
+      if (node.className && typeof node.className === 'string' && /option|result|item|suggest|row|ac_/i.test(node.className)) {
+        return true;
+      }
+      node = node.parentElement;
+    }
+    return false;
+  }
+
+  // Interactive elements that aren't text entry/submit and are worth recording
+  // as ordered navigation steps (e.g. the Supervisor "Search" tab).
+  function isNavClick(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const tag = el.tagName.toLowerCase();
+    if (tag === 'a' || tag === 'button') return true;
+    const role = el.getAttribute && el.getAttribute('role');
+    if (role === 'tab' || role === 'button') return true;
+    if (tag === 'input') {
+      const t = (el.getAttribute('type') || '').toLowerCase();
+      return t === 'button';
+    }
+    return false;
+  }
+
+  // Build a selector for `target` relative to `container`, so replay can click
+  // the right control inside a matched option row (e.g. the "+" add link).
+  function relSelector(container, target) {
+    if (!container || container === target) return null;
+    const tag = target.tagName.toLowerCase();
+    let sel = tag;
+    if (target.className && typeof target.className === 'string') {
+      const c = target.className.trim().split(/\s+/).filter(Boolean)[0];
+      if (c) sel = `${tag}.${DOM.CSS_ESCAPE(c)}`;
+    }
+    try {
+      if (container.querySelector(sel)) return sel;
+    } catch (_) {}
+    return tag;
   }
 
   function fieldText(el) {
@@ -71,10 +119,15 @@
     // Prefer role=option / li ancestry.
     let node = optionEl;
     let best = null;
-    for (let i = 0; i < 4 && node && node.nodeType === 1; i++) {
+    for (let i = 0; i < 5 && node && node.nodeType === 1; i++) {
       const role = node.getAttribute && node.getAttribute('role');
       const tag = node.tagName.toLowerCase();
-      if (role === 'option' || tag === 'li' || (node.className && /option|result|item|suggest/i.test(node.className))) {
+      if (
+        role === 'option' ||
+        tag === 'li' ||
+        tag === 'tr' ||
+        (node.className && /option|result|item|suggest|row/i.test(node.className))
+      ) {
         best = node;
         break;
       }
@@ -94,7 +147,7 @@
     } else {
       optionSelector = tag;
     }
-    return { optionSelector, candidates: cands };
+    return { optionSelector, candidates: cands, container: target };
   }
 
   function handleFocusIn(e) {
@@ -147,14 +200,16 @@
       pendingType &&
       Date.now() - pendingType.ts < AUTOCOMPLETE_WINDOW_MS &&
       el !== pendingType.el &&
-      !pendingType.el.contains(el)
+      !pendingType.el.contains(el) &&
+      isOptionLike(el)
     ) {
-      const { optionSelector, candidates } = optionContainerSelector(el);
+      const { optionSelector, candidates, container } = optionContainerSelector(el);
       emit({
         role: ROLE.AUTOCOMPLETE,
         candidates: pendingType.candidates,
         optionSelector,
         optionCandidates: candidates,
+        clickRel: relSelector(container, el),
         sampleValue: pendingType.value,
         sampleOptionText: (el.textContent || '').trim().slice(0, 120),
         text: pendingType.text,
@@ -172,6 +227,13 @@
     if (isSubmitLike(el)) {
       emit({
         role: ROLE.SUBMIT,
+        candidates: DOM.generateCandidateSelectors(el),
+        text: (el.textContent || el.value || '').trim().slice(0, 80),
+        tag: el.tagName.toLowerCase()
+      });
+    } else if (isNavClick(el)) {
+      emit({
+        role: ROLE.CLICK,
         candidates: DOM.generateCandidateSelectors(el),
         text: (el.textContent || el.value || '').trim().slice(0, 80),
         tag: el.tagName.toLowerCase()

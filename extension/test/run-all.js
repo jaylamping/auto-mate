@@ -18,7 +18,9 @@ async function main() {
 
   const suites = [
     ['recorder.dom', './recorder.dom.test.js'],
-    ['engine.dom', './engine.dom.test.js']
+    ['engine.dom', './engine.dom.test.js'],
+    ['recorder.medhub', './recorder.medhub.test.js'],
+    ['engine.medhub', './engine.medhub.test.js']
   ];
 
   for (const [name, mod] of suites) {

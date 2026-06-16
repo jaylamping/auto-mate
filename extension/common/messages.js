@@ -32,7 +32,8 @@
     INPUT: 'input',
     AUTOCOMPLETE: 'autocomplete',
     STATIC: 'static',
-    SUBMIT: 'submit'
+    SUBMIT: 'submit',
+    CLICK: 'click'
   };
 
   // Canonical logical field names the recipe maps spreadsheet columns onto.
@@ -42,7 +43,8 @@
     SUPERVISOR: 'supervisor',
     MRN: 'mrn',
     PROCEDURE: 'procedure',
-    SUBMIT: 'submit'
+    SUBMIT: 'submit',
+    CLICK: 'click'
   };
 
   const STORAGE_KEYS = {
