@@ -90,7 +90,37 @@ module.exports = async function run() {
     page2.RECORDER.stop();
     const procOnly = steps2.find((s) => s.role === 'autocomplete' && /procedures_list/.test(s.optionSelector || ''));
     assert.ok(procOnly, 'procedure "+" without search typing still records');
+    // Regression: with no pending type, the input candidate must resolve to the
+    // real search box, NOT the header nav <a aria-label="Procedures Link">.
+    assert.ok(
+      (procOnly.candidates || []).some((c) => /procedures_searchterms/.test(String(c.value || ''))),
+      'procedure input resolves to #procedures_searchterms, not the nav link'
+    );
+    assert.ok(
+      !(procOnly.candidates || []).some((c) => /Procedures\\? Link|aria-label="Procedures/.test(String(c.value || ''))),
+      'procedure input must not be the header nav "Procedures Link" anchor'
+    );
     console.log('  recorder.medhub-live: procedure "+" without search typing still records.');
+  }
+
+  // Clicking a non-button container <div> (whose descendants include the "Log
+  // Procedure" submit button) must NOT be recorded as a submit step.
+  {
+    const page5 = createPage('medhub-procedure-log-live.html');
+    const steps5 = [];
+    page5.RECORDER.start((step) => steps5.push(step));
+    const wrapper = page5.document.createElement('div');
+    wrapper.textContent = 'Background Information';
+    const realForm = page5.document.getElementById('procedureform');
+    realForm.parentNode.insertBefore(wrapper, realForm);
+    wrapper.appendChild(realForm); // wrapper now contains the form + Log Procedure button
+    clickEl(page5.window, wrapper);
+    page5.RECORDER.stop();
+    assert.ok(
+      !steps5.some((s) => s.role === 'submit'),
+      'clicking a wrapper div must not be recorded as a submit'
+    );
+    console.log('  recorder.medhub-live: wrapper div click is not recorded as submit.');
   }
 
   // Typing location then clicking an option-like decoy must not record procedure autocomplete.

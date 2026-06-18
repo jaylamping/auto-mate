@@ -6,6 +6,14 @@
  * -> side panel goes via chrome.runtime.sendMessage (relayed by background).
  */
 (function (root) {
+  // Guard against double-binding. The same scripts can load twice on one page:
+  // once from the manifest content_scripts entry (<all_urls>) and again when the
+  // side panel calls chrome.scripting.executeScript via ensureInjected. Without
+  // this guard, two message listeners + two recorders run, producing duplicate
+  // recorded steps and double engine execution. The first copy to load wins.
+  if (root.__FAA_CONTENT_OWNER__) return;
+  root.__FAA_CONTENT_OWNER__ = true;
+
   const { MSG, BUILD_ID } = root.FAA_MSG;
   const RECORDER = root.FAA_RECORDER;
   const ENGINE = root.FAA_ENGINE;

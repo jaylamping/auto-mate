@@ -75,16 +75,37 @@
     return false;
   }
 
+  function ownText(el) {
+    let s = '';
+    for (const n of el.childNodes) {
+      if (n.nodeType === 3) s += n.nodeValue;
+    }
+    return s.trim();
+  }
+
   function isSubmitLike(el) {
     const tag = el.tagName.toLowerCase();
+    if (tag === 'input') {
+      const t = (el.getAttribute('type') || '').toLowerCase();
+      return t === 'submit' || t === 'image';
+    }
     if (tag === 'button') {
       const t = (el.getAttribute('type') || 'submit').toLowerCase();
       if (t === 'submit') return true;
     }
-    if (tag === 'input' && (el.getAttribute('type') || '').toLowerCase() === 'submit') return true;
-    const text = (el.textContent || '').trim().toLowerCase();
-    // "Log Procedure" is MedHub's submit button.
-    return /\b(submit|save|accept|sign|file|done|finish|log)\b/.test(text);
+    // Text heuristic only for small actionable controls, using the element's own
+    // label/text — never descendant text. A container <div> wrapping the whole
+    // form has "Log Procedure" deep inside and must not be treated as a submit.
+    if (tag === 'a' || tag === 'button' || el.getAttribute('role') === 'button') {
+      const label = (el.getAttribute('aria-label') || el.value || ownText(el) || '')
+        .trim()
+        .toLowerCase();
+      // "Log Procedure" is MedHub's submit button.
+      if (label && label.length <= 40 && /\b(submit|save|accept|sign|file|done|finish|log)\b/.test(label)) {
+        return true;
+      }
+    }
+    return false;
   }
 
   // Whether a clicked element looks like an autocomplete/list option (so a
@@ -409,6 +430,31 @@
     return /\bproc\b/.test(hay) && /\bsearch\b/.test(hay);
   }
 
+  // Resolve the procedure *search* text input. We query selectors one at a time
+  // (not as a comma list) because document.querySelector with a comma list
+  // returns the first match in document order — and the header nav "Procedures"
+  // link matches [aria-label*="Procedure"], so a comma list wrongly returns the
+  // nav anchor instead of the real search box lower on the page.
+  function findProcedureSearchInput() {
+    const direct = [
+      '#procedures_searchterms',
+      'input[name="procedures_searchterms"]',
+      '#procSearch',
+      '#proc_search'
+    ];
+    for (const sel of direct) {
+      const el = document.querySelector(sel);
+      if (el && isTextEntry(el)) return el;
+    }
+    // Fall back to any text entry the heuristic recognises as a procedure search
+    // field. Restrict to real inputs/textareas so the nav <a> can never match.
+    const inputs = document.querySelectorAll('input, textarea');
+    for (const el of inputs) {
+      if (isTextEntry(el) && isProcedureSearchField(el)) return el;
+    }
+    return null;
+  }
+
   // The "+" add control. Idealized fixture uses <a class="add">; live MedHub
   // uses <a onClick="procedures_add(249,'- -','Ablation', ...)"> with a fa-plus
   // icon, where all three links in the row call procedures_add.
@@ -446,11 +492,7 @@
       optionSelector = '#procedures_list tbody tr';
     }
     const procPending = pendingType && isProcedureSearchField(pendingType.el) ? pendingType : null;
-    const procInput =
-      procPending?.el ||
-      document.querySelector(
-        '#procSearch, #proc_search, #procedures_searchterms, [name="procedures_searchterms"], [aria-label*="Procedure" i], [name*="procedure" i][type="text"]'
-      );
+    const procInput = procPending?.el || findProcedureSearchInput();
     const inputCandidates = procPending
       ? procPending.candidates
       : procInput
@@ -723,6 +765,11 @@
 
   function start(cb, liveCb, diagCb) {
     if (active) return;
+    // Defense-in-depth against duplicate capture: if another injected copy of
+    // the recorder is already capturing on this page, don't bind a second set of
+    // listeners (which would double every recorded step / diagnostic event).
+    if (root.__FAA_RECORDER_ACTIVE__) return;
+    root.__FAA_RECORDER_ACTIVE__ = true;
     active = true;
     onStep = cb;
     onLiveInput = liveCb || null;
@@ -751,6 +798,7 @@
     if (!active) return;
     flushPendingTypeAsInput();
     active = false;
+    root.__FAA_RECORDER_ACTIVE__ = false;
     onStep = null;
     onLiveInput = null;
     onDiag = null;

@@ -52,6 +52,27 @@
     }
   }
 
+  // After filling a field, MedHub re-validates required fields on blur/change to
+  // enable the "Next"/submit button. We set values programmatically (which does
+  // not move focus), so without this the last field never blurs and the button
+  // can stay disabled even though every required field is filled.
+  function commitField(el) {
+    if (!el || el.nodeType !== 1) return;
+    try {
+      el.dispatchEvent(new Event('change', { bubbles: true }));
+    } catch (_) {}
+    try {
+      el.dispatchEvent(new FocusEvent('blur', { bubbles: false }));
+    } catch (_) {
+      try {
+        el.dispatchEvent(new Event('blur', { bubbles: false }));
+      } catch (_) {}
+    }
+    try {
+      el.dispatchEvent(new Event('focusout', { bubbles: true }));
+    } catch (_) {}
+  }
+
   // MedHub's Procedure Date is a jQuery UI datepicker (class="datepicker_icon").
   // Focusing/typing opens a #ui-datepicker-div calendar overlay; if left open it
   // can sit on top of the next control and swallow the click. We type the value
@@ -394,6 +415,103 @@
     return null;
   }
 
+  // ---- Procedure search input ----------------------------------------------
+  // At replay we always type the procedure name from the spreadsheet into the
+  // search box, then pick the matching row. We resolve the real search input
+  // here (rather than trusting the recorded candidates, which on the live page
+  // can mis-resolve to the header nav "Procedures" link).
+  function isProcedureSearchInput(el) {
+    if (!el || !isTextEntry(el)) return false;
+    const hay = elementFieldHay(el) + ' ' + (el.getAttribute('placeholder') || '').toLowerCase();
+    if (/date|note|location|site|facility|patientid|encounter|mrn|supervis/.test(hay)) return false;
+    if (/procedures?[_\s]*search/.test(hay)) return true;
+    return /\bproc\b/.test(hay) && /\bsearch\b/.test(hay);
+  }
+
+  function findProcedureSearchInput() {
+    const direct = [
+      '#procedures_searchterms',
+      'input[name="procedures_searchterms"]',
+      '#procSearch',
+      '#proc_search'
+    ];
+    for (const sel of direct) {
+      const el = document.querySelector(sel);
+      if (el && isTextEntry(el) && DOM.isVisible(el)) return el;
+    }
+    for (const el of document.querySelectorAll('input, textarea')) {
+      if (isProcedureSearchInput(el) && DOM.isVisible(el)) return el;
+    }
+    return null;
+  }
+
+  // ---- Supervisor "Other" free-text tab ------------------------------------
+  function isSupervisorOtherElement(el) {
+    return !!(el && (el.id === 'supervisor_other' || el.name === 'supervisor_other'));
+  }
+
+  function stepUsesSupervisorOther(step) {
+    return (step.candidates || []).some((c) =>
+      /supervisor_other|supervisor_tab_3|procedures_supervisor_tab\('other'/i.test(String(c.value || ''))
+    );
+  }
+
+  function findSupervisorOtherTab() {
+    const byId = document.getElementById('supTabOther') || document.getElementById('supervisor_tab_3');
+    if (byId) return byId;
+    const byHandler = document.querySelector('[onclick*="procedures_supervisor_tab(\'other\'"]');
+    if (byHandler) return byHandler;
+    const tabs = document.querySelector('.sup-tabs, .mhSubTabs');
+    if (tabs) {
+      for (const link of tabs.querySelectorAll('a, button, [role="tab"]')) {
+        if (normalizeMatchKey(link.textContent) === 'other') return link;
+      }
+    }
+    return null;
+  }
+
+  function findSupervisorOtherInput() {
+    const el =
+      document.getElementById('supervisor_other') ||
+      document.querySelector('input[name="supervisor_other"]');
+    return el && isTextEntry(el) ? el : null;
+  }
+
+  async function ensureSupervisorOtherOpen() {
+    let input = findSupervisorOtherInput();
+    if (input && DOM.isVisible(input) && !input.disabled) return input;
+    const tab = findSupervisorOtherTab();
+    if (tab) {
+      tab.click();
+      await sleep(40);
+    }
+    input = findSupervisorOtherInput();
+    if (input && input.disabled) input.disabled = false;
+    return input || null;
+  }
+
+  // Supervisor is free text on the "Other" tab: open it, type the name, and sync
+  // the hidden fields MedHub uses to persist the value.
+  async function selectSupervisorFromOther(query, opts = {}) {
+    const q = String(query == null ? '' : query).trim();
+    if (!q) throw new Error('Empty supervisor value');
+    const input = await ensureSupervisorOtherOpen();
+    if (!input) throw new Error('Supervisor "Other" field not available');
+    const charDelayMs = opts.typeCharDelayMs != null ? opts.typeCharDelayMs : DEFAULT_TYPE_CHAR_MS;
+    await typeInto(input, q, { charDelayMs });
+    const save = document.getElementById('supervisor_other_save');
+    if (save) {
+      setNativeValue(save, q);
+      fireInput(save);
+    }
+    const method = document.getElementById('supervisor_method');
+    if (method) {
+      setNativeValue(method, 'other');
+      fireInput(method);
+    }
+    return q;
+  }
+
   function visibleSupervisorOptions(optionSelector) {
     const sel =
       optionSelector ||
@@ -483,6 +601,11 @@
   }
 
   async function selectSupervisor(query, step, opts = {}) {
+    // Recorded via the free-text "Other" tab → replay that directly.
+    if (stepUsesSupervisorOther(step)) {
+      return selectSupervisorFromOther(query, opts);
+    }
+
     const listSelect = findSupervisorListSelect();
     if (listSelect) {
       const fromList = trySelectSupervisorFromList(listSelect, query);
@@ -499,9 +622,19 @@
       }
       inputEl = findSupervisorSearchInput() || DOM.resolveElement(step.candidates);
     }
-    if (!inputEl) throw new Error('Supervisor search input not found');
+    // No List match and no Search input — fall back to the free-text Other tab.
+    if (!inputEl) {
+      return selectSupervisorFromOther(query, opts);
+    }
 
-    return selectSupervisorFromSearch(inputEl, step.optionSelector, query, opts);
+    try {
+      return await selectSupervisorFromSearch(inputEl, step.optionSelector, query, opts);
+    } catch (searchErr) {
+      // The name isn't in the List/Search results — Other free text always works.
+      const other = await selectSupervisorFromOther(query, opts).catch(() => null);
+      if (other) return other;
+      throw searchErr;
+    }
   }
 
   function isSkippableSupervisorNavClick(step) {
@@ -591,6 +724,8 @@
   function shouldResolveWithoutVisibility(step, found) {
     if (!found) return false;
     if (step.role === ROLE.AUTOCOMPLETE && step.field === FIELD.SUPERVISOR) return true;
+    // Supervisor "Other" field may be hidden until its tab is opened at replay.
+    if (step.role === ROLE.INPUT && step.field === FIELD.SUPERVISOR && isSupervisorOtherElement(found)) return true;
     if (step.role === ROLE.INPUT && step.field === FIELD.NOTES && !isNotesLikeElement(found)) return true;
     if (
       step.role === ROLE.INPUT &&
@@ -847,6 +982,10 @@
               outcome: 'skipped',
               detail: 'Wrong target for Supervisor'
             });
+          } else if (step.field === FIELD.SUPERVISOR && isSupervisorOtherElement(el)) {
+            // Free-text "Other" supervisor: ensure the tab is open, then type.
+            const chosen = await selectSupervisorFromOther(v, acOpts);
+            record({ field: step.field, role: step.role, value: v, chosen, outcome: 'success' });
           } else if (el.tagName.toLowerCase() === 'select') {
             setSelectByQuery(el, v);
             record({ field: step.field, role: step.role, value: v, outcome: 'success' });
@@ -868,8 +1007,11 @@
                 record({ field: step.field, role: step.role, outcome: 'skipped', detail: 'No value in row' });
                 continue;
               }
+              // Always type the procedure name into the real search box, then
+              // pick the matching row. Prefer the live search input over the
+              // recorded candidates (which can mis-resolve to the nav link).
               const inputEl = await waitFor(() => {
-                const f = DOM.resolveElement(step.candidates);
+                const f = findProcedureSearchInput() || DOM.resolveElement(step.candidates);
                 return f && DOM.isVisible(f) ? f : null;
               });
               if (!inputEl) {
@@ -937,6 +1079,13 @@
             submitEl.click();
             record({ field: step.field, role: step.role, outcome: 'success', detail: 'Submitted' });
           }
+        }
+
+        // Nudge the page's required-field validation so the Next/submit button
+        // enables. Only for plain fills — autocomplete picks already commit via
+        // their own option click and must not be blurred mid-selection.
+        if ((step.role === ROLE.INPUT || step.role === ROLE.STATIC) && el) {
+          commitField(el);
         }
       } catch (err) {
         if (err && err.message === 'aborted') {

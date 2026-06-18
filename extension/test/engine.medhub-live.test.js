@@ -269,4 +269,141 @@ module.exports = async function run() {
     assert.strictEqual(document.querySelector('input[name="location_other"]').disabled, false, 'location_other enabled via OTHER select');
     console.log('  engine.medhub-live: location_other fallback when dropdown has no match.');
   }
+
+  // ---- Dry run loops every row and NEVER submits ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const recipe = buildRecipe(page.MSG);
+    const rows = [
+      { ...row, mrn: '111', procedures: ['Colonoscopy'] },
+      { ...row, mrn: '222', procedures: ['Biopsy'] },
+      { ...row, mrn: '333', procedures: ['Ablation'] }
+    ];
+    const logAnother = document.querySelector('input[name="log_another"]');
+    logAnother.checked = false;
+
+    // Mirror the side panel loop: one runRow per row, dryRun=true, with index/total.
+    for (let i = 0; i < rows.length; i++) {
+      const result = await ENGINE.runRow(recipe, rows[i], {
+        dryRun: true,
+        fieldDelayMs: 0,
+        typeCharDelayMs: 0,
+        index: i,
+        total: rows.length
+      });
+      assert.ok(result.ok, `dry row ${i + 1} ok: ` + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+      const submitAction = result.actions.find((a) => a.role === page.MSG.ROLE.SUBMIT);
+      assert.ok(submitAction, `row ${i + 1} reached the submit step`);
+      assert.strictEqual(submitAction.outcome, 'skipped', `row ${i + 1} submit skipped in dry run`);
+      assert.ok(/DRY RUN/i.test(submitAction.detail || ''), `row ${i + 1} marked DRY RUN`);
+      // Each row replaces the prior row's procedures (loop advances cleanly).
+      assert.deepStrictEqual(selectedTitles(document), [rows[i].procedures[0]], `row ${i + 1} shows only its own procedure`);
+    }
+
+    assert.notStrictEqual(document.body.getAttribute('data-submitted'), 'true', 'dry run never submitted the form');
+    assert.ok(
+      !document.body.getAttribute('data-submit-count') || document.body.getAttribute('data-submit-count') === '0',
+      'submit count stayed at 0 across all dry-run rows'
+    );
+    assert.strictEqual(logAnother.checked, false, 'dry run never touches Log Another (no inter-row submit)');
+    console.log('  engine.medhub-live: dry run loops all rows and never submits.');
+  }
+
+  // ---- Filling required fields enables the dithered "Next" button ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const nextBtn = document.getElementById('nextBtn');
+    assert.strictEqual(nextBtn.disabled, true, 'Next button starts dithered/disabled');
+    const result = await ENGINE.runRow(buildRecipe(page.MSG), row, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, 'dry run ok');
+    assert.strictEqual(nextBtn.disabled, false, 'Next button enabled after required fields committed (blur/change fired)');
+    console.log('  engine.medhub-live: required-field commit un-dithers the Next button.');
+  }
+
+  // ---- Supervisor via the free-text "Other" tab (recorded that way) ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const { ROLE, FIELD } = page.MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    const otherRecipe = {
+      version: 1,
+      url: 'https://ahc.medhub.com/u/r/procedures_log.mh',
+      procedureRepeatable: true,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('input[name="procedure_date"]') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('input[name="location_other"]') },
+        { field: FIELD.CLICK, role: ROLE.CLICK, candidates: css('#supervisor_tab_3') },
+        { field: FIELD.SUPERVISOR, role: ROLE.INPUT, candidates: css('input[name="supervisor_other"]') },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('input[name="patientID_other"]') }
+      ]
+    };
+    const otherRow = { ...row, supervisor: 'Dr. Freetext Name' };
+    const result = await ENGINE.runRow(otherRecipe, otherRow, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, 'supervisor Other ok: ' + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.strictEqual(document.querySelector('input[name="supervisor_other"]').value, 'Dr. Freetext Name', 'free-text supervisor typed into supervisor_other');
+    assert.strictEqual(document.getElementById('supervisor_other_save').value, 'Dr. Freetext Name', 'hidden supervisor_other_save synced');
+    assert.strictEqual(document.getElementById('supervisor_method').value, 'other', 'supervisor_method set to other');
+    console.log('  engine.medhub-live: supervisor via free-text "Other" tab.');
+  }
+
+  // ---- Supervisor falls back to "Other" when name isn't in List/Search ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const { ROLE, FIELD } = page.MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    const recipe = {
+      version: 1,
+      url: 'https://ahc.medhub.com/u/r/procedures_log.mh',
+      procedureRepeatable: true,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('input[name="procedure_date"]') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('input[name="location_other"]') },
+        { field: FIELD.SUPERVISOR, role: ROLE.AUTOCOMPLETE, optionSelector: 'div.optionDiv', candidates: css('select[name="supervisorID"]') },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('input[name="patientID_other"]') }
+      ]
+    };
+    const unknownRow = { ...row, supervisor: 'Nonexistent Attending' };
+    const result = await ENGINE.runRow(recipe, unknownRow, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, 'fallback-to-other ok: ' + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.strictEqual(document.querySelector('input[name="supervisor_other"]').value, 'Nonexistent Attending', 'unmatched supervisor falls back to free-text Other');
+    console.log('  engine.medhub-live: supervisor falls back to free-text Other when unmatched.');
+  }
+
+  // ---- Procedure: types the name into the search box, then selects ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const { ROLE, FIELD } = page.MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    // Recipe whose procedure input candidate WRONGLY points at the header nav
+    // "Procedures" link (the live mis-resolution). The engine must still find the
+    // real search box, type the name to filter, then click the match.
+    const recipe = {
+      version: 1,
+      url: 'https://ahc.medhub.com/u/r/procedures_log.mh',
+      procedureRepeatable: true,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('input[name="procedure_date"]') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('input[name="location_other"]') },
+        { field: FIELD.SUPERVISOR, role: ROLE.AUTOCOMPLETE, optionSelector: 'div.optionDiv', candidates: css('select[name="supervisorID"]') },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('input[name="patientID_other"]') },
+        {
+          field: FIELD.PROCEDURE,
+          role: ROLE.AUTOCOMPLETE,
+          optionSelector: '#procedures_list tbody tr',
+          clickRel: 'a',
+          candidates: css('a[aria-label="Procedures Link"]')
+        }
+      ]
+    };
+    const result = await ENGINE.runRow(recipe, { ...row, procedures: ['Colonoscopy'] }, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, 'procedure type+select ok: ' + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.strictEqual(document.getElementById('procedures_searchterms').value, '', 'search box reset by procedures_add after typing+selecting');
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy'], 'procedure added by typing then selecting, despite nav-link candidate');
+    console.log('  engine.medhub-live: procedure typed into search box then selected.');
+  }
 };

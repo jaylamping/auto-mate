@@ -30,6 +30,21 @@
 <html lang="en">
   <head><meta charset="utf-8" /><title>Log Procedure/Case - MedHub</title></head>
   <body>
+    <!-- Live MedHub header nav. The "Procedures" link has aria-label="Procedures
+         Link" and appears BEFORE the form, so a comma-list querySelector that
+         includes [aria-label*="Procedure"] wrongly resolves the procedure search
+         box to this anchor. The recorder must skip it and find the real input. -->
+    <div id="mhHeaderNavigation">
+      <div></div>
+      <div>
+        <ul>
+          <li><a href="/u/home.mh" aria-label="Home Link">Home</a></li>
+          <li><a href="/u/schedule.mh" aria-label="Schedule Link">Schedule</a></li>
+          <li><a href="/u/evaluations.mh" aria-label="Evaluations Link">Evaluations</a></li>
+          <li><a href="/u/r/procedures.mh" aria-label="Procedures Link">Procedures</a></li>
+        </ul>
+      </div>
+    </div>
     <h1>Log Procedure/Case</h1>
     <form action="/functions/common/procedures_update.mh" method="POST" name="procedureform" id="procedureform">
       <input type="hidden" name="userID" value="107227" />
@@ -220,6 +235,7 @@
       </table>
 
       <input type="submit" id="procedure_submit" name="submit" value="Log Procedure" />
+      <button type="button" id="nextBtn" disabled>Next</button>
       <label><input type="checkbox" name="log_another" value="true" class="checkradios" /> Log another</label>
     </form>
 
@@ -288,7 +304,15 @@
         window.procedures_supervisor_tab = function (which) {
           var pane = document.getElementById('procedures_supervisor_pane');
           document.getElementById('supervisor_method').value = which;
-          if (which === 'search') {
+          if (which === 'other') {
+            // Live "Other" tab swaps in a free-text supervisor name input.
+            pane.innerHTML =
+              '<input type="text" name="supervisor_other" id="supervisor_other" aria-label="Enter the supervisor name" autocomplete="off" />';
+            var other = document.getElementById('supervisor_other');
+            other.addEventListener('input', function () {
+              document.getElementById('supervisor_other_save').value = other.value;
+            });
+          } else if (which === 'search') {
             pane.innerHTML =
               '<input type="text" name="searchterms" id="searchterms" aria-label="Enter the search terms" autocomplete="off" />' +
               '<div id="ajax_listOfOptions" style="display:none"></div>';
@@ -371,6 +395,23 @@
         window.procedures_search = function () {
           filterProcedures(document.getElementById('procedures_searchterms').value);
         };
+
+        // "Next" stays dithered until required fields validate. MedHub wires this
+        // to blur/change of the required fields, so it only re-checks when a field
+        // is committed (blurred) — not merely when its value is set in code.
+        function checkRequired() {
+          var date = document.querySelector('input[name="procedure_date"]');
+          var locSel = document.querySelector('select[name="locationID"]');
+          var locOther = document.querySelector('input[name="location_other"]');
+          var mrn = document.querySelector('input[name="patientID_other"]');
+          var hasDate = date && String(date.value).trim() !== '';
+          var hasLoc =
+            (locSel && String(locSel.value).trim() !== '') ||
+            (locOther && !locOther.disabled && String(locOther.value).trim() !== '');
+          var hasMrn = mrn && String(mrn.value).trim() !== '';
+          document.getElementById('nextBtn').disabled = !(hasDate && hasLoc && hasMrn);
+        }
+        document.addEventListener('focusout', checkRequired, true);
 
         document.getElementById('procedureform').addEventListener('submit', function (e) {
           e.preventDefault();
