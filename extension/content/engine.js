@@ -160,6 +160,41 @@
     return (optionEl.textContent || '').trim();
   }
 
+  function findLocationSelect() {
+    return document.querySelector('select[name="locationID"]');
+  }
+
+  function findLocationOtherInput() {
+    return document.querySelector('input[name="location_other"]');
+  }
+
+  /** Live MedHub only enables location_other after choosing OTHER on locationID. */
+  function ensureLocationOtherEnabled() {
+    const other = findLocationOtherInput();
+    if (!other || !other.disabled) return other;
+    const sel = findLocationSelect();
+    if (!sel) return other;
+    for (const opt of sel.options) {
+      if ((opt.value || '') === '') {
+        setNativeValue(sel, opt.value);
+        fireInput(sel);
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        break;
+      }
+    }
+    return other;
+  }
+
+  async function fillLocationOther(el, value, opts = {}) {
+    const target =
+      el && el.name === 'location_other' ? el : findLocationOtherInput() || el;
+    ensureLocationOtherEnabled();
+    if (target && target.disabled) {
+      throw new Error('Location specify field could not be enabled');
+    }
+    await typeInto(target, value, opts);
+  }
+
   function supervisorNamesMatch(label, query) {
     const a = normalizeMatchKey(label);
     const b = normalizeMatchKey(query);
@@ -228,7 +263,16 @@
   }
 
   function isSupervisorLikeElement(el) {
-    return /supervis|attending|precept/.test(elementFieldHay(el));
+    if (!el) return false;
+    if (/supervis|attending|precept/.test(elementFieldHay(el))) return true;
+    // Live MedHub Search tab: generic input[name="searchterms"] inside supervisor pane.
+    if ((el.name === 'searchterms' || el.id === 'searchterms') && isInSupervisorPane(el)) return true;
+    const method = document.getElementById('supervisor_method');
+    return !!(method && method.value === 'search' && el.name === 'searchterms');
+  }
+
+  function isInSupervisorPane(el) {
+    return !!(el && el.closest && el.closest('#procedures_supervisor_pane'));
   }
 
   function isNotesLikeElement(el) {
@@ -248,12 +292,17 @@
   }
 
   function findSupervisorSearchInput() {
+    const scoped =
+      document.querySelector('#procedures_supervisor_pane input[name="searchterms"]') ||
+      document.querySelector('#procedures_supervisor_pane #searchterms');
+    if (scoped && isTextEntry(scoped)) return scoped;
     const byId =
       document.getElementById('supSearch') ||
       document.getElementById('sup_search') ||
       document.getElementById('supervisor_search') ||
-      document.querySelector('input[name="supervisor_search"]');
-    if (byId && isTextEntry(byId)) return byId;
+      document.getElementById('searchterms') ||
+      document.querySelector('input[name="supervisor_search"], input[name="searchterms"]');
+    if (byId && isTextEntry(byId) && byId.name !== 'procedures_searchterms') return byId;
     const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])');
     for (const el of nodes) {
       if (isTextEntry(el) && isSupervisorLikeElement(el)) return el;
@@ -262,16 +311,23 @@
   }
 
   function visibleSupervisorOptions(optionSelector) {
-    return Array.from(document.querySelectorAll(optionSelector || 'li.sup_result'))
+    const sel =
+      optionSelector ||
+      '#ajax_listOfOptions div.optionDiv, div.optionDiv, li.sup_result, #ajax_listOfOptions [class*="option"]';
+    return Array.from(document.querySelectorAll(sel))
       .filter((o) => DOM.isVisible(o) && extractOptionLabel(o).length > 0);
   }
 
   async function selectSupervisorFromSearch(inputEl, optionSelector, query, opts = {}) {
-    const searchTab = findSupervisorSearchTab();
-    if (searchTab) {
-      searchTab.click();
-      await sleep(40);
+    if (!inputEl || !DOM.isVisible(inputEl)) {
+      const searchTab = findSupervisorSearchTab();
+      if (searchTab) {
+        searchTab.click();
+        await sleep(40);
+      }
+      inputEl = findSupervisorSearchInput() || inputEl;
     }
+    if (!inputEl) throw new Error('Supervisor search input not found');
 
     const q = String(query).trim();
     if (!q) throw new Error('Empty supervisor value');
@@ -344,6 +400,14 @@
 
     let inputEl = findSupervisorSearchInput();
     if (!inputEl) inputEl = DOM.resolveElement(step.candidates);
+    if (!inputEl) {
+      const searchTab = findSupervisorSearchTab();
+      if (searchTab) {
+        searchTab.click();
+        await sleep(40);
+      }
+      inputEl = findSupervisorSearchInput() || DOM.resolveElement(step.candidates);
+    }
     if (!inputEl) throw new Error('Supervisor search input not found');
 
     return selectSupervisorFromSearch(inputEl, step.optionSelector, query, opts);
@@ -539,6 +603,8 @@
   }
 
   function findLogAnotherCheckbox() {
+    const byName = document.querySelector('input[type="checkbox"][name="log_another"]');
+    if (byName) return byName;
     const byId = document.getElementById('logAnother');
     if (byId && String(byId.type).toLowerCase() === 'checkbox') return byId;
     for (const cb of document.querySelectorAll('input[type="checkbox"]')) {
@@ -658,6 +724,8 @@
           if (el.tagName.toLowerCase() === 'select') {
             setNativeValue(el, String(v));
             fireInput(el);
+          } else if (step.field === FIELD.LOCATION) {
+            await fillLocationOther(el, v, { charDelayMs: typeCharDelayMs });
           } else {
             await typeInto(el, v);
           }
@@ -692,6 +760,9 @@
           } else if (el.tagName.toLowerCase() === 'select') {
             setNativeValue(el, String(v));
             fireInput(el);
+            record({ field: step.field, role: step.role, value: v, outcome: 'success' });
+          } else if (step.field === FIELD.LOCATION && el && el.name === 'location_other') {
+            await fillLocationOther(el, v, { charDelayMs: typeCharDelayMs });
             record({ field: step.field, role: step.role, value: v, outcome: 'success' });
           } else {
             await typeInto(el, v);

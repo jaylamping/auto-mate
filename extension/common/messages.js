@@ -29,7 +29,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '13';
+  const BUILD_ID = '15';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -164,6 +164,20 @@
     return best;
   }
 
+  function candidateHaystack(candidates) {
+    return (candidates || []).map((c) => String(c.value || '')).join(' ').toLowerCase();
+  }
+
+  /** Live MedHub Search tab uses a generic input[name="searchterms"], not supervisor_search. */
+  function isSupervisorSearchCandidates(candidates) {
+    const hay = candidateHaystack(candidates);
+    if (/procedures_searchterms|proc_search|#procsearch/.test(hay)) return false;
+    if (/supervisor_search|sup_search|supsearch/.test(hay)) return true;
+    if (/procedures_supervisor/.test(hay) && /searchterms/.test(hay)) return true;
+    if (/input\[name="searchterms"\]|#searchterms\b|\[name="searchterms"\]/.test(hay)) return true;
+    return false;
+  }
+
   /** Guess logical field from label / accessible name only (not cell values). */
   function guessFieldFromLabel(text, role) {
     const hay = String(text || '').toLowerCase();
@@ -190,6 +204,7 @@
 
   /** Label first; only use short typed prefixes from sampleValue when label is empty. */
   function autoGuessField(step) {
+    if (isSupervisorSearchCandidates(step.candidates)) return FIELD.SUPERVISOR;
     const fromLabel = guessFieldFromLabel(step.text, step.role);
     if (fromLabel) return fromLabel;
     const sample = String(step.sampleValue || '');
@@ -243,6 +258,7 @@
     pickPreferredColumnMatch,
     guessFieldFromLabel,
     autoGuessField,
+    isSupervisorSearchCandidates,
     headerAllowedForFieldKey,
     isNotesLikeHeader,
     isSupervisorLikeHeader

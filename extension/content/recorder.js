@@ -203,7 +203,7 @@
       el,
       value,
       candidates: DOM.generateCandidateSelectors(el),
-      text: fieldText(el),
+      text: supervisorFieldText(el),
       ts: Date.now(),
       stepId: null,
       emitted: false
@@ -240,7 +240,7 @@
       role: ROLE.INPUT,
       candidates: DOM.generateCandidateSelectors(el),
       sampleValue: value,
-      text: fieldText(el),
+      text: supervisorFieldText(el),
       tag,
       blurred: Boolean(opts.blurred),
       debounced: Boolean(opts.debounced)
@@ -357,12 +357,32 @@
   function isSupervisorSearchInput(el) {
     if (!el) return false;
     const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
-    return /supervis|attending|precept/.test(hay);
+    if (/supervis|attending|precept/.test(hay)) return true;
+    if ((el.name === 'searchterms' || el.id === 'searchterms') && isInSupervisorPane(el)) return true;
+    const method = document.getElementById('supervisor_method');
+    return !!(method && method.value === 'search' && el.name === 'searchterms');
+  }
+
+  function isInSupervisorPane(el) {
+    return !!(el && el.closest && el.closest('#procedures_supervisor_pane'));
+  }
+
+  function supervisorFieldText(el) {
+    return isSupervisorSearchInput(el) ? 'Supervisor' : fieldText(el);
   }
 
   function findSupervisorSearchInput() {
-    const byId = document.getElementById('supSearch') || document.getElementById('sup_search');
-    if (byId && isTextEntry(byId)) return byId;
+    const scoped =
+      document.querySelector('#procedures_supervisor_pane input[name="searchterms"]') ||
+      document.querySelector('#procedures_supervisor_pane #searchterms');
+    if (scoped && isTextEntry(scoped)) return scoped;
+    const byId =
+      document.getElementById('supSearch') ||
+      document.getElementById('sup_search') ||
+      document.getElementById('supervisor_search') ||
+      document.getElementById('searchterms') ||
+      document.querySelector('input[name="supervisor_search"], input[name="searchterms"]');
+    if (byId && isTextEntry(byId) && byId.name !== 'procedures_searchterms') return byId;
     const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])');
     for (const el of nodes) {
       if (isTextEntry(el) && isSupervisorSearchInput(el)) return el;
@@ -372,12 +392,15 @@
 
   function isSupervisorResultClick(el) {
     if (!el) return false;
-    const row = el.closest && el.closest('li, [role="option"], tr');
+    if (el.closest && el.closest('#ajax_listOfOptions') && findSupervisorSearchInput()) return true;
+    const row = el.closest && el.closest('li, [role="option"], tr, div.optionDiv, div.option');
     if (!row) return false;
-    const list = row.closest('ul, ol, [role="listbox"], .ac_results');
+    const list = row.closest('ul, ol, [role="listbox"], .ac_results, #ajax_listOfOptions');
     const listHay = `${list && list.id || ''} ${list && list.className || ''} ${row.className || ''}`.toLowerCase();
     if (/proc_result|proc_list|proc_row|procedure/.test(listHay)) return false;
-    if (!/sup|supervisor|ac_result|ac_item|sup_result|ac_results/.test(listHay)) return false;
+    if (!/sup|supervisor|ac_result|ac_item|sup_result|ac_results|ajax_listofoptions|optiondiv|option/.test(listHay)) {
+      return false;
+    }
     return Boolean(findSupervisorSearchInput());
   }
 
@@ -398,7 +421,7 @@
       clickRel: relSelector(container, el),
       sampleValue: input.value || (pendingType && pendingType.el === input ? pendingType.value : ''),
       sampleOptionText,
-      text: fieldText(input),
+      text: supervisorFieldText(input),
       tag: input.tagName.toLowerCase()
     });
     if (pendingType && pendingType.el === input) {

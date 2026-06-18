@@ -727,7 +727,9 @@
 
   function isSupervisorSearchTabLearnStep(s) {
     if (s.role !== ROLE.CLICK || s._field !== FIELD.CLICK) return false;
-    return (s.candidates || []).some((c) => /supTabSearch/i.test(String(c.value || '')));
+    return (s.candidates || []).some((c) =>
+      /supTabSearch|supervisor_tab_2|procedures_supervisor_tab\('search'/i.test(String(c.value || ''))
+    );
   }
 
   function stepToRecipeStep(s) {

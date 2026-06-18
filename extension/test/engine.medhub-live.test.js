@@ -64,6 +64,7 @@ module.exports = async function run() {
     assert.strictEqual(document.querySelector('input[name="procedure_date"]').value, '06/17/2026', 'date');
     assert.strictEqual(document.getElementById('ui-datepicker-div').style.display, 'none', 'datepicker calendar dismissed after filling the date');
     assert.strictEqual(document.querySelector('input[name="location_other"]').value, 'IMC', 'location_other = IMC');
+    assert.strictEqual(document.querySelector('input[name="location_other"]').disabled, false, 'location_other enabled via OTHER select');
     assert.strictEqual(document.querySelector('select[name="supervisorID"]').value, '99001', 'supervisor picked from List <select>');
     assert.strictEqual(document.getElementById('supervisor_search_userID').value, '99001', 'live hidden supervisor userID set via select change');
     assert.strictEqual(document.querySelector('input[name="patientID_other"]').value, '000123456', 'MRN into patientID_other');
@@ -106,5 +107,97 @@ module.exports = async function run() {
     await ENGINE.runRow(recipe, row2, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
     assert.deepStrictEqual(selectedTitles(document), ['Ablation'], 'row2 replaces prior procedures');
     console.log('  engine.medhub-live: clears prior procedures via procedures_delete before next row.');
+  }
+
+  // ---- Supervisor Search tab (live page default): input[name="searchterms"] ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE, window } = page;
+    window.procedures_supervisor_tab('search');
+    const { ROLE, FIELD } = page.MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    const searchRecipe = {
+      version: 1,
+      url: 'https://ahc.medhub.com/u/r/procedures_log.mh',
+      procedureRepeatable: true,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('input[name="procedure_date"]') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('input[name="location_other"]') },
+        {
+          field: FIELD.SUPERVISOR,
+          role: ROLE.AUTOCOMPLETE,
+          optionSelector: 'div.optionDiv',
+          candidates: css('input[name="searchterms"]')
+        },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('input[name="patientID_other"]') },
+        {
+          field: FIELD.PROCEDURE,
+          role: ROLE.AUTOCOMPLETE,
+          optionSelector: '#procedures_list tbody tr',
+          clickRel: 'a',
+          candidates: css('input[name="procedures_searchterms"]')
+        },
+        { field: FIELD.SUBMIT, role: ROLE.SUBMIT, candidates: css('#procedureform input[type="submit"]') }
+      ]
+    };
+    const result = await ENGINE.runRow(searchRecipe, row, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, 'search-tab dry run ok: ' + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.strictEqual(document.querySelector('input[name="searchterms"]').value, 'Smith, John', 'supervisor picked via searchterms');
+    assert.strictEqual(document.getElementById('supervisor_search_userID').value, '99999', 'hidden supervisor userID set from search pick');
+    assert.strictEqual(document.getElementById('supervisor_method').value, 'search', 'supervisor_method stays search');
+    console.log('  engine.medhub-live: supervisor Search tab via input[name="searchterms"].');
+  }
+
+  // ---- Search-tab supervisor from cold List tab (no manual tab switch) ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const { ROLE, FIELD } = page.MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    const searchRecipe = {
+      version: 1,
+      url: 'https://ahc.medhub.com/u/r/procedures_log.mh',
+      procedureRepeatable: true,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('input[name="procedure_date"]') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('input[name="location_other"]') },
+        {
+          field: FIELD.SUPERVISOR,
+          role: ROLE.AUTOCOMPLETE,
+          optionSelector: 'div.optionDiv',
+          candidates: css('input[name="searchterms"]')
+        },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('input[name="patientID_other"]') },
+        {
+          field: FIELD.PROCEDURE,
+          role: ROLE.AUTOCOMPLETE,
+          optionSelector: '#procedures_list tbody tr',
+          clickRel: 'a',
+          candidates: css('input[name="procedures_searchterms"]')
+        },
+        { field: FIELD.SUBMIT, role: ROLE.SUBMIT, candidates: css('#procedureform input[type="submit"]') }
+      ]
+    };
+    assert.ok(document.querySelector('select[name="supervisorID"]'), 'starts on List tab');
+    assert.ok(!document.querySelector('input[name="searchterms"]'), 'searchterms absent until Search tab');
+    const searchOnlyRow = { ...row, supervisor: 'Smithson, Karen' };
+    const result = await ENGINE.runRow(searchRecipe, searchOnlyRow, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, 'cold List→Search supervisor ok: ' + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.strictEqual(document.querySelector('input[name="searchterms"]').value, 'Smithson, Karen', 'supervisor resolved after opening Search tab');
+    console.log('  engine.medhub-live: Search-tab supervisor works from default List tab.');
+  }
+
+  // ---- log_another checkbox (live name="log_another") on multi-row submit ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const recipe = buildRecipe(page.MSG);
+    const logAnother = document.querySelector('input[name="log_another"]');
+    assert.ok(logAnother, 'live fixture has name="log_another" checkbox');
+    logAnother.checked = false;
+    const result = await ENGINE.runRow(recipe, row, { dryRun: false, fieldDelayMs: 0, typeCharDelayMs: 0, index: 0, total: 2 });
+    assert.ok(result.ok, 'first row submit ok');
+    assert.strictEqual(logAnother.checked, true, 'log_another checked when more rows remain');
+    console.log('  engine.medhub-live: checks name="log_another" for batch runs.');
   }
 };

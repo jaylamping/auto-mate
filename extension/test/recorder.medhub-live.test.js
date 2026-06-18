@@ -76,4 +76,27 @@ module.exports = async function run() {
     assert.ok(procOnly, 'procedure "+" without search typing still records');
     console.log('  recorder.medhub-live: procedure "+" without search typing still records.');
   }
+
+  // ---- Supervisor Search tab: generic input[name="searchterms"] ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { window, document, RECORDER } = page;
+    window.procedures_supervisor_tab('search');
+    const steps = [];
+    RECORDER.start((step) => steps.push(step));
+    const supSearch = document.querySelector('input[name="searchterms"]');
+    assert.ok(supSearch, 'search tab exposes input[name="searchterms"]');
+    typeValue(window, supSearch, 'Smith');
+    await sleep(20);
+    const option = document.querySelector('#ajax_listOfOptions div.optionDiv');
+    assert.ok(option, 'supervisor search renders optionDiv results');
+    clickEl(window, option);
+    RECORDER.stop();
+    const supAuto = steps.find(
+      (s) => s.role === 'autocomplete' && (s.candidates || []).some((c) => /searchterms/.test(c.value))
+    );
+    assert.ok(supAuto, 'supervisor search autocomplete recorded');
+    assert.strictEqual(supAuto.text, 'Supervisor', 'searchterms step labeled Supervisor for mapping');
+    console.log('  recorder.medhub-live: supervisor Search tab searchterms autocomplete recorded.');
+  }
 };

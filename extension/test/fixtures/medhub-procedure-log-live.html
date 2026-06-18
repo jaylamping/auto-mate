@@ -204,7 +204,8 @@
         </div>
       </div>
 
-      <input type="submit" value="Log Procedure" />
+      <input type="submit" id="procedure_submit" name="submit" value="Log Procedure" />
+      <label><input type="checkbox" name="log_another" value="true" class="checkradios" /> Log another</label>
     </form>
 
     <script>
@@ -252,9 +253,9 @@
           document.getElementById('supervisor_method').value = which;
           if (which === 'search') {
             pane.innerHTML =
-              '<input type="text" name="supervisor_search" id="supervisor_search" aria-label="supervisor search" autocomplete="off" />' +
+              '<input type="text" name="searchterms" id="searchterms" aria-label="Enter the search terms" autocomplete="off" />' +
               '<div id="ajax_listOfOptions" style="display:none"></div>';
-            var input = document.getElementById('supervisor_search');
+            var input = document.getElementById('searchterms');
             var box = document.getElementById('ajax_listOfOptions');
             var SUPS = ['Smith, John', 'Smithson, Karen', 'Lee, Karen', 'Diaz Sierra, Alejandra'];
             input.addEventListener('input', function () {
