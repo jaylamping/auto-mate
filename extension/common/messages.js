@@ -29,7 +29,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '16';
+  const BUILD_ID = '17';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -194,6 +194,14 @@
     return /procedures_searchterms|proc_search|#procsearch|procedures_list/.test(hay);
   }
 
+  function isEncounterCandidates(candidates) {
+    const hay = candidateHaystack(candidates);
+    if (/patient_gender|patient_age|gender|patient_age/.test(hay)) return false;
+    return /patientid_other|\[name="patientid_other"\]|#patientid_other|patient_mrn|encountertext|\[name="patientid"\]|select\[name="patientid"\]|#patientid\b/.test(
+      hay
+    );
+  }
+
   /** Guess logical field from label / accessible name only (not cell values). */
   function guessFieldFromLabel(text, role) {
     const hay = String(text || '').toLowerCase();
@@ -204,9 +212,11 @@
     if (/^date\b|\bdate\b/.test(hay) && !/update/.test(hay)) return FIELD.DATE;
     if (/location|site|facility/.test(hay)) return FIELD.LOCATION;
     if (/supervis|attending|precept/.test(hay)) return FIELD.SUPERVISOR;
-    if (/encounter|mrn|patient id|medical record/.test(hay)) return FIELD.ENCOUNTER;
     if (/patient gender|\bgender\b|\bsex\b/.test(hay)) return FIELD.GENDER;
     if (/patient age|\bage\b/.test(hay)) return FIELD.AGE;
+    if (/encounter|mrn|patientid_other|select patient\b|medical record|\bpatientid\b/.test(hay)) {
+      return FIELD.ENCOUNTER;
+    }
     if (/diagnos|\bicd\b|\bdx\b/.test(hay)) return FIELD.DIAGNOSIS;
     if (/complicat/.test(hay)) return FIELD.COMPLICATIONS;
     if (/procedure\s*notes?|\bcomments?\b/.test(hay)) return FIELD.NOTES;
@@ -223,6 +233,7 @@
     if (isSupervisorSearchCandidates(step.candidates)) return FIELD.SUPERVISOR;
     if (isDateCandidates(step.candidates)) return FIELD.DATE;
     if (isLocationCandidates(step.candidates)) return FIELD.LOCATION;
+    if (isEncounterCandidates(step.candidates)) return FIELD.ENCOUNTER;
     if (isProcedureFieldCandidates(step.candidates)) return FIELD.PROCEDURE;
     const fromLabel = guessFieldFromLabel(step.text, step.role);
     if (fromLabel) return fromLabel;
@@ -279,6 +290,7 @@
     isSupervisorSearchCandidates,
     isDateCandidates,
     isLocationCandidates,
+    isEncounterCandidates,
     isProcedureFieldCandidates,
     headerAllowedForFieldKey,
     isNotesLikeHeader,

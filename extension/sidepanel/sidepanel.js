@@ -6,7 +6,7 @@
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
 (function () {
-  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isProcedureFieldCandidates } = window.FAA_MSG;
+  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isEncounterCandidates, isProcedureFieldCandidates } = window.FAA_MSG;
   const PARSER = window.FAA_PARSER;
   const REPORT = window.FAA_REPORT;
 
@@ -309,6 +309,7 @@
   function isProcedureLearnStep(step) {
     if (!step || step.role !== ROLE.AUTOCOMPLETE) return false;
     if (isLocationCandidates(step.candidates) || isDateCandidates(step.candidates)) return false;
+    if (isEncounterCandidates(step.candidates)) return false;
     if (isProcedureFieldCandidates(step.candidates)) return true;
     if (step.clickRel && /\badd\b/i.test(step.clickRel)) return true;
     const picked = String(step.sampleOptionText || '').trim();

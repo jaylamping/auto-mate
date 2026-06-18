@@ -27,6 +27,8 @@ module.exports = async function run() {
 
   // MRN
   typeValue(window, document.querySelector('input[name="patientID_other"]'), '000123456');
+  const mrnInput = document.querySelector('input[name="patientID_other"]');
+  mrnInput.dispatchEvent(new window.FocusEvent('blur', { bubbles: true }));
 
   // Procedure: filter then click the "+" add (an <a onClick="procedures_add(...)">)
   const procSearch = document.getElementById('procedures_searchterms');
@@ -55,6 +57,12 @@ module.exports = async function run() {
     (s) => s.role === 'input' && (s.candidates || []).some((c) => /supervisorID/.test(c.value))
   );
   assert.ok(supInput, 'supervisor List <select> change recorded as an input step');
+
+  const mrnStep = steps.find(
+    (s) => s.role === 'input' && (s.candidates || []).some((c) => /patientID_other/.test(c.value))
+  );
+  assert.ok(mrnStep, 'patientID_other recorded as input step');
+  assert.strictEqual(mrnStep.text, 'Encounter', 'encounter field labeled for mapping');
 
   assert.ok(steps.some((s) => s.role === 'submit'), 'form submit recorded');
 

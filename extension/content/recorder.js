@@ -284,7 +284,7 @@
   function isProcedureSearchField(el) {
     if (!el) return false;
     const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
-    if (/date|note|location|site|facility/.test(hay)) return false;
+    if (/date|note|location|site|facility|patientid|encounter|mrn/.test(hay)) return false;
     // Live MedHub: <input name="procedures_searchterms" onkeyup="procedures_search()">.
     if (/procedures?[_\s]*search/.test(hay)) return true;
     if (/proc_search|procedure\s*search/.test(hay.replace(/\s+/g, ' '))) return true;
@@ -371,6 +371,17 @@
     return false;
   }
 
+  function isEncounterField(el) {
+    if (!el) return false;
+    const tag = el.tagName && el.tagName.toLowerCase();
+    const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
+    if (/patient_gender|patient_age/.test(hay)) return false;
+    if (/patientid_other/.test(hay)) return true;
+    if (tag === 'select' && el.name === 'patientID') return true;
+    if (/encounter|select patient\b|\bpatientid\b/.test(hay)) return true;
+    return false;
+  }
+
   function isAutocompleteTypingField(el) {
     return isProcedureSearchField(el) || isSupervisorSearchInput(el);
   }
@@ -378,6 +389,7 @@
   function mappedFieldText(el) {
     if (isDateField(el)) return 'Procedure Date';
     if (isLocationField(el)) return 'Location';
+    if (isEncounterField(el)) return 'Encounter';
     if (isSupervisorSearchInput(el)) return 'Supervisor';
     return fieldText(el);
   }

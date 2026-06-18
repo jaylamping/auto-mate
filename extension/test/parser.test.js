@@ -77,6 +77,21 @@ assert.strictEqual(
   FIELD.LOCATION,
   'location_other autocomplete is not misclassified as procedure'
 );
+assert.strictEqual(
+  autoGuessField({
+    role: ROLE.INPUT,
+    text: 'patientID_other',
+    sampleValue: '000123456',
+    candidates: [{ type: 'css', value: 'input[name="patientID_other"]' }]
+  }),
+  FIELD.ENCOUNTER,
+  'patientID_other maps to encounter via candidates and label'
+);
+assert.strictEqual(
+  guessFieldFromLabel('select patient', ROLE.INPUT),
+  FIELD.ENCOUNTER,
+  'select patient aria-label maps to encounter'
+);
 assert.strictEqual(headerAllowedForFieldKey('Procedure Notes', FIELD.SUPERVISOR), false);
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.SUPERVISOR), true);
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.NOTES), false);
