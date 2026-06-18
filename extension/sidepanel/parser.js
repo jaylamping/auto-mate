@@ -152,7 +152,11 @@
         .map((s) => s.trim())
         .filter(Boolean);
       return {
-        date: dateCol ? excelDateToISO(r[dateCol]) : '',
+        date: dateCol
+          ? root.FAA_MSG && root.FAA_MSG.toMedHubDateString
+            ? root.FAA_MSG.toMedHubDateString(excelDateToISO(r[dateCol]))
+            : excelDateToISO(r[dateCol])
+          : '',
         supervisor: supCol ? String(r[supCol] == null ? '' : r[supCol]).trim() : '',
         mrn: encounterCol ? normalizeMRN(r[encounterCol]) : '',
         procedures,

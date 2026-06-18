@@ -275,7 +275,7 @@
         role: ROLE.INPUT,
         candidates: pendingType.candidates,
         sampleValue: pendingType.value,
-        text: pendingType.text,
+        text: mappedFieldText(pendingType.el),
         tag: pendingType.el.tagName.toLowerCase()
     });
     pendingType.emitted = true;
@@ -382,6 +382,29 @@
     return false;
   }
 
+  function isGenderField(el) {
+    if (!el) return false;
+    const hay = `${el.id || ''} ${el.name || ''}`.toLowerCase();
+    return el.name === 'patient_gender' || /select patient gender/.test(fieldText(el).toLowerCase());
+  }
+
+  function isAgeField(el) {
+    if (!el) return false;
+    return el.name === 'patient_age' || /select patient age/.test(fieldText(el).toLowerCase());
+  }
+
+  function isDiagnosisField(el) {
+    return el && el.name === 'diagnosis';
+  }
+
+  function isComplicationsField(el) {
+    return el && el.name === 'complications';
+  }
+
+  function isNotesField(el) {
+    return el && el.name === 'notes';
+  }
+
   function isAutocompleteTypingField(el) {
     return isProcedureSearchField(el) || isSupervisorSearchInput(el);
   }
@@ -390,6 +413,11 @@
     if (isDateField(el)) return 'Procedure Date';
     if (isLocationField(el)) return 'Location';
     if (isEncounterField(el)) return 'Encounter';
+    if (isGenderField(el)) return 'Patient Gender';
+    if (isAgeField(el)) return 'Patient Age';
+    if (isDiagnosisField(el)) return 'Diagnosis';
+    if (isComplicationsField(el)) return 'Complications';
+    if (isNotesField(el)) return 'Procedure Notes';
     if (isSupervisorSearchInput(el)) return 'Supervisor';
     return fieldText(el);
   }

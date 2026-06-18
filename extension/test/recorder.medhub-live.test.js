@@ -150,4 +150,29 @@ module.exports = async function run() {
     assert.strictEqual(supAuto.text, 'Supervisor', 'searchterms step labeled Supervisor for mapping');
     console.log('  recorder.medhub-live: supervisor Search tab searchterms autocomplete recorded.');
   }
+
+  // ---- Optional fields get friendly Learn labels ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { window, document, RECORDER } = page;
+    const steps = [];
+    RECORDER.start((step) => steps.push(step));
+    document.querySelector('select[name="patient_gender"]').value = 'F';
+    document.querySelector('select[name="patient_gender"]').dispatchEvent(new window.Event('change', { bubbles: true }));
+    typeValue(window, document.querySelector('input[name="diagnosis"]'), 'K57.30');
+    document.querySelector('input[name="diagnosis"]').dispatchEvent(new window.FocusEvent('blur', { bubbles: true }));
+    typeValue(window, document.querySelector('textarea[name="notes"]'), 'Test note');
+    document.querySelector('textarea[name="notes"]').dispatchEvent(new window.FocusEvent('blur', { bubbles: true }));
+    RECORDER.stop();
+    const genderStep = steps.find((s) => (s.candidates || []).some((c) => /patient_gender/.test(c.value)));
+    assert.ok(genderStep, 'gender select recorded');
+    assert.strictEqual(genderStep.text, 'Patient Gender', 'gender labeled for mapping');
+    const dxStep = steps.find((s) => (s.candidates || []).some((c) => /diagnosis/.test(c.value)));
+    assert.ok(dxStep, 'diagnosis recorded');
+    assert.strictEqual(dxStep.text, 'Diagnosis', 'diagnosis labeled for mapping');
+    const notesStep = steps.find((s) => (s.candidates || []).some((c) => /notes/.test(c.value)));
+    assert.ok(notesStep, 'notes recorded');
+    assert.strictEqual(notesStep.text, 'Procedure Notes', 'notes labeled for mapping');
+    console.log('  recorder.medhub-live: optional fields labeled for mapping.');
+  }
 };

@@ -29,7 +29,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '17';
+  const BUILD_ID = '18';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -202,6 +202,46 @@
     );
   }
 
+  function isGenderCandidates(candidates) {
+    return /patient_gender|\[name="patient_gender"\]|select patient gender/.test(candidateHaystack(candidates));
+  }
+
+  function isAgeCandidates(candidates) {
+    return /patient_age|\[name="patient_age"\]|select patient age/.test(candidateHaystack(candidates));
+  }
+
+  function isDiagnosisCandidates(candidates) {
+    return /\[name="diagnosis"\]|#diagnosis\b|^input\[name="diagnosis"\]/.test(candidateHaystack(candidates));
+  }
+
+  function isComplicationsCandidates(candidates) {
+    return /\[name="complications"\]|^input\[name="complications"\]/.test(candidateHaystack(candidates));
+  }
+
+  function isNotesCandidates(candidates) {
+    return /\[name="notes"\]|textarea\[name="notes"\]|^textarea\[name="notes"\]/.test(candidateHaystack(candidates));
+  }
+
+  function isLocationDropdownCandidates(candidates) {
+    const hay = candidateHaystack(candidates);
+    return /locationid|\[name="locationid"\]|select\[name="locationid"\]/.test(hay) && !/location_other/.test(hay);
+  }
+
+  /** MedHub procedure date inputs expect MM/DD/YYYY, not ISO YYYY-MM-DD from Excel. */
+  function toMedHubDateString(value) {
+    const s = String(value == null ? '' : value).trim();
+    if (!s) return '';
+    const iso = s.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (iso) return `${iso[2]}/${iso[3]}/${iso[1]}`;
+    const slash = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (slash) {
+      const mm = slash[1].padStart(2, '0');
+      const dd = slash[2].padStart(2, '0');
+      return `${mm}/${dd}/${slash[3]}`;
+    }
+    return s;
+  }
+
   /** Guess logical field from label / accessible name only (not cell values). */
   function guessFieldFromLabel(text, role) {
     const hay = String(text || '').toLowerCase();
@@ -212,8 +252,8 @@
     if (/^date\b|\bdate\b/.test(hay) && !/update/.test(hay)) return FIELD.DATE;
     if (/location|site|facility/.test(hay)) return FIELD.LOCATION;
     if (/supervis|attending|precept/.test(hay)) return FIELD.SUPERVISOR;
-    if (/patient gender|\bgender\b|\bsex\b/.test(hay)) return FIELD.GENDER;
-    if (/patient age|\bage\b/.test(hay)) return FIELD.AGE;
+    if (/patient gender|\bgender\b|\bsex\b|patient_gender/.test(hay)) return FIELD.GENDER;
+    if (/patient age|\bage\b|patient_age/.test(hay)) return FIELD.AGE;
     if (/encounter|mrn|patientid_other|select patient\b|medical record|\bpatientid\b/.test(hay)) {
       return FIELD.ENCOUNTER;
     }
@@ -234,6 +274,11 @@
     if (isDateCandidates(step.candidates)) return FIELD.DATE;
     if (isLocationCandidates(step.candidates)) return FIELD.LOCATION;
     if (isEncounterCandidates(step.candidates)) return FIELD.ENCOUNTER;
+    if (isGenderCandidates(step.candidates)) return FIELD.GENDER;
+    if (isAgeCandidates(step.candidates)) return FIELD.AGE;
+    if (isDiagnosisCandidates(step.candidates)) return FIELD.DIAGNOSIS;
+    if (isComplicationsCandidates(step.candidates)) return FIELD.COMPLICATIONS;
+    if (isNotesCandidates(step.candidates)) return FIELD.NOTES;
     if (isProcedureFieldCandidates(step.candidates)) return FIELD.PROCEDURE;
     const fromLabel = guessFieldFromLabel(step.text, step.role);
     if (fromLabel) return fromLabel;
@@ -291,6 +336,13 @@
     isDateCandidates,
     isLocationCandidates,
     isEncounterCandidates,
+    isGenderCandidates,
+    isAgeCandidates,
+    isDiagnosisCandidates,
+    isComplicationsCandidates,
+    isNotesCandidates,
+    isLocationDropdownCandidates,
+    toMedHubDateString,
     isProcedureFieldCandidates,
     headerAllowedForFieldKey,
     isNotesLikeHeader,

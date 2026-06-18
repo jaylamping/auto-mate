@@ -96,6 +96,11 @@ assert.strictEqual(headerAllowedForFieldKey('Procedure Notes', FIELD.SUPERVISOR)
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.SUPERVISOR), true);
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.NOTES), false);
 
+const { toMedHubDateString } = root.FAA_MSG;
+assert.strictEqual(toMedHubDateString('2026-01-05'), '01/05/2026', 'ISO date -> MedHub MM/DD/YYYY');
+assert.strictEqual(toMedHubDateString('06/17/2026'), '06/17/2026', 'already MedHub format stays');
+assert.strictEqual(toMedHubDateString('6/7/2026'), '06/07/2026', 'single-digit month/day padded');
+
 const { tabMatchesRecipeUrl } = root.FAA_MSG;
 assert.strictEqual(
   tabMatchesRecipeUrl(
@@ -137,6 +142,7 @@ async function run() {
   assert.deepStrictEqual(rows[0].procedures, ['Colonoscopy']);
   assert.strictEqual(rows[0].location, 'IMC');
   assert.strictEqual(rows[0].mrn, '000123456');
+  assert.strictEqual(rows[0].date, '01/05/2026', 'engine rows use MedHub date format');
   assert.deepStrictEqual(rows[1].procedures, ['Polypectomy']);
 
   // Delimited cell expands into multiple procedures on that row.

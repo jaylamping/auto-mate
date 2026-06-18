@@ -7,7 +7,7 @@
  */
 (function (root) {
   const DOM = root.FAA_DOM;
-  const { ROLE, FIELD, normalizeMatchKey } = root.FAA_MSG;
+  const { ROLE, FIELD, normalizeMatchKey, toMedHubDateString } = root.FAA_MSG;
 
   let abortFlag = false;
 
@@ -86,7 +86,7 @@
   }
 
   async function fillDateField(el, value, opts = {}) {
-    const str = String(value);
+    const str = toMedHubDateString(value);
     dismissDatePicker(el);
     el.focus();
     // Live MedHub uses jQuery UI datepicker; setDate keeps widget state in sync.
@@ -229,6 +229,56 @@
     await typeInto(target, value, opts);
   }
 
+  function setSelectByQuery(selectEl, query) {
+    if (!selectEl || query == null || String(query).trim() === '') return null;
+    const q = String(query).trim();
+    const qk = normalizeMatchKey(q);
+    for (const opt of selectEl.options) {
+      if (opt.value === q) {
+        setNativeValue(selectEl, opt.value);
+        fireInput(selectEl);
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        return (opt.textContent || '').trim() || opt.value;
+      }
+    }
+    for (const opt of selectEl.options) {
+      const label = (opt.textContent || '').trim();
+      const val = (opt.value || '').trim();
+      if (!label && !val) continue;
+      const lk = normalizeMatchKey(label);
+      const vk = normalizeMatchKey(val);
+      if (lk === qk || vk === qk || (qk.length >= 2 && (lk.includes(qk) || qk.includes(lk)))) {
+        setNativeValue(selectEl, opt.value);
+        fireInput(selectEl);
+        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+        return label || val;
+      }
+    }
+    return null;
+  }
+
+  async function fillLocation(el, value, opts = {}) {
+    const v = String(value == null ? '' : value).trim();
+    if (!v) return;
+    const sel = findLocationSelect();
+    if (sel) {
+      for (const opt of sel.options) {
+        const val = (opt.value || '').trim();
+        const label = (opt.textContent || '').trim();
+        if (val === '') continue;
+        const lk = normalizeMatchKey(label);
+        const vk = normalizeMatchKey(v);
+        if (lk.includes(vk) || vk.includes(lk) || val === v) {
+          setNativeValue(sel, opt.value);
+          fireInput(sel);
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+          return;
+        }
+      }
+    }
+    await fillLocationOther(el, v, opts);
+  }
+
   function supervisorNamesMatch(label, query) {
     const a = normalizeMatchKey(label);
     const b = normalizeMatchKey(query);
@@ -347,7 +397,7 @@
   function visibleSupervisorOptions(optionSelector) {
     const sel =
       optionSelector ||
-      '#ajax_listOfOptions div.optionDiv, div.optionDiv, li.sup_result, #ajax_listOfOptions [class*="option"]';
+      '#ajax_listOfOptions div.optionDiv, #procedures_supervisor_pane div.optionDiv, li.sup_result, #ajax_listOfOptions [class*="option"]';
     return Array.from(document.querySelectorAll(sel))
       .filter((o) => DOM.isVisible(o) && extractOptionLabel(o).length > 0);
   }
@@ -396,6 +446,13 @@
 
       if (visible.length === 1) {
         const chosen = extractOptionLabel(visible[0]);
+        if (!supervisorNamesMatch(chosen, query)) {
+          if (len < q.length) {
+            if (charDelayMs > 0) await sleep(charDelayMs);
+            continue;
+          }
+          throw new Error(`Supervisor result "${chosen}" does not match "${query}"`);
+        }
         visible[0].click();
         await sleep(50);
         return chosen;
@@ -755,11 +812,10 @@
           }
         } else if (step.role === ROLE.STATIC) {
           const v = step.staticValue != null ? step.staticValue : valueForField(step.field, row);
-          if (el.tagName.toLowerCase() === 'select') {
-            setNativeValue(el, String(v));
-            fireInput(el);
-          } else if (step.field === FIELD.LOCATION) {
-            await fillLocationOther(el, v, { charDelayMs: typeCharDelayMs });
+          if (step.field === FIELD.LOCATION) {
+            await fillLocation(el, v, { charDelayMs: typeCharDelayMs });
+          } else if (el.tagName.toLowerCase() === 'select') {
+            setSelectByQuery(el, v);
           } else {
             await typeInto(el, v);
           }
@@ -792,14 +848,13 @@
               detail: 'Wrong target for Supervisor'
             });
           } else if (el.tagName.toLowerCase() === 'select') {
-            setNativeValue(el, String(v));
-            fireInput(el);
+            setSelectByQuery(el, v);
             record({ field: step.field, role: step.role, value: v, outcome: 'success' });
           } else if (step.field === FIELD.DATE || isDatePickerField(el)) {
             await fillDateField(el, v, { charDelayMs: typeCharDelayMs });
             record({ field: step.field, role: step.role, value: v, outcome: 'success' });
-          } else if (step.field === FIELD.LOCATION && el && el.name === 'location_other') {
-            await fillLocationOther(el, v, { charDelayMs: typeCharDelayMs });
+          } else if (step.field === FIELD.LOCATION) {
+            await fillLocation(el, v, { charDelayMs: typeCharDelayMs });
             record({ field: step.field, role: step.role, value: v, outcome: 'success' });
           } else {
             await typeInto(el, v);

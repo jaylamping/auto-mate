@@ -6,7 +6,7 @@
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
 (function () {
-  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isEncounterCandidates, isProcedureFieldCandidates } = window.FAA_MSG;
+  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isLocationDropdownCandidates, isEncounterCandidates, isGenderCandidates, isAgeCandidates, isDiagnosisCandidates, isComplicationsCandidates, isNotesCandidates, isProcedureFieldCandidates } = window.FAA_MSG;
   const PARSER = window.FAA_PARSER;
   const REPORT = window.FAA_REPORT;
 
@@ -310,6 +310,9 @@
     if (!step || step.role !== ROLE.AUTOCOMPLETE) return false;
     if (isLocationCandidates(step.candidates) || isDateCandidates(step.candidates)) return false;
     if (isEncounterCandidates(step.candidates)) return false;
+    if (isGenderCandidates(step.candidates) || isAgeCandidates(step.candidates)) return false;
+    if (isDiagnosisCandidates(step.candidates) || isComplicationsCandidates(step.candidates)) return false;
+    if (isNotesCandidates(step.candidates)) return false;
     if (isProcedureFieldCandidates(step.candidates)) return true;
     if (step.clickRel && /\badd\b/i.test(step.clickRel)) return true;
     const picked = String(step.sampleOptionText || '').trim();
@@ -737,15 +740,24 @@
 
   function stepToRecipeStep(s) {
     let role = s.role || ROLE.INPUT;
-    if (s._field === FIELD.LOCATION) role = ROLE.STATIC;
-    else if (s._field === FIELD.CLICK) role = ROLE.CLICK;
+    if (s._field === FIELD.LOCATION) {
+      role = isLocationDropdownCandidates(s.candidates) ? ROLE.INPUT : ROLE.STATIC;
+    } else if (s._field === FIELD.CLICK) {
+      role = ROLE.CLICK;
+    }
+    const staticValue =
+      s._field === FIELD.LOCATION && role === ROLE.STATIC
+        ? s.staticValue != null
+          ? s.staticValue
+          : s.sampleValue
+        : undefined;
     return {
       field: s._field,
       role,
       candidates: s.candidates || [],
       optionSelector: s.optionSelector,
       clickRel: s.clickRel,
-      staticValue: s._field === FIELD.LOCATION ? (s.staticValue || 'IMC') : undefined
+      staticValue
     };
   }
 
