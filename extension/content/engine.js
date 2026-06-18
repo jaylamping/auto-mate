@@ -85,6 +85,40 @@
     }
   }
 
+  async function fillDateField(el, value, opts = {}) {
+    const str = String(value);
+    dismissDatePicker(el);
+    el.focus();
+    // Live MedHub uses jQuery UI datepicker; setDate keeps widget state in sync.
+    try {
+      const win = el.ownerDocument && el.ownerDocument.defaultView;
+      const jq = win && (win.jQuery || win.$);
+      if (jq && jq.fn && jq.fn.datepicker && jq(el).datepicker) {
+        const hasPicker =
+          (el.classList && el.classList.contains('hasDatepicker')) ||
+          typeof jq(el).data === 'function' && jq(el).data('datepicker');
+        if (hasPicker) {
+          jq(el).datepicker('setDate', str);
+          jq(el).datepicker('hide');
+          fireInput(el);
+          dismissDatePicker(el);
+          return;
+        }
+      }
+    } catch (_) {}
+    const charDelayMs = opts.charDelayMs != null ? opts.charDelayMs : 0;
+    if (charDelayMs > 0) {
+      await typeChars(el, str, charDelayMs);
+    } else {
+      setNativeValue(el, '');
+      fireInput(el);
+      setNativeValue(el, str);
+      fireInput(el);
+      fireKeystrokes(el);
+    }
+    dismissDatePicker(el);
+  }
+
   async function typeInto(el, value, opts = {}) {
     const charDelayMs = opts.charDelayMs != null ? opts.charDelayMs : 0;
     if (charDelayMs > 0) {
@@ -760,6 +794,9 @@
           } else if (el.tagName.toLowerCase() === 'select') {
             setNativeValue(el, String(v));
             fireInput(el);
+            record({ field: step.field, role: step.role, value: v, outcome: 'success' });
+          } else if (step.field === FIELD.DATE || isDatePickerField(el)) {
+            await fillDateField(el, v, { charDelayMs: typeCharDelayMs });
             record({ field: step.field, role: step.role, value: v, outcome: 'success' });
           } else if (step.field === FIELD.LOCATION && el && el.name === 'location_other') {
             await fillLocationOther(el, v, { charDelayMs: typeCharDelayMs });

@@ -63,6 +63,7 @@ module.exports = async function run() {
 
     assert.strictEqual(document.querySelector('input[name="procedure_date"]').value, '06/17/2026', 'date');
     assert.strictEqual(document.getElementById('ui-datepicker-div').style.display, 'none', 'datepicker calendar dismissed after filling the date');
+    assert.strictEqual(document.querySelector('input[name="procedure_date"]').classList.contains('hasDatepicker'), true, 'jquery datepicker hook present');
     assert.strictEqual(document.querySelector('input[name="location_other"]').value, 'IMC', 'location_other = IMC');
     assert.strictEqual(document.querySelector('input[name="location_other"]').disabled, false, 'location_other enabled via OTHER select');
     assert.strictEqual(document.querySelector('select[name="supervisorID"]').value, '99001', 'supervisor picked from List <select>');

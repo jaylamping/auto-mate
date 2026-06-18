@@ -53,6 +53,30 @@ assert.strictEqual(
   FIELD.NOTES,
   'procedure notes label maps to notes'
 );
+assert.strictEqual(
+  guessFieldFromLabel('procedure_date', ROLE.INPUT),
+  FIELD.DATE,
+  'procedure_date name maps to date'
+);
+assert.strictEqual(
+  autoGuessField({
+    role: ROLE.INPUT,
+    text: '',
+    candidates: [{ type: 'css', value: 'input[name="procedure_date"]' }]
+  }),
+  FIELD.DATE,
+  'procedure_date candidates map to date'
+);
+assert.strictEqual(
+  autoGuessField({
+    role: ROLE.AUTOCOMPLETE,
+    text: '',
+    sampleValue: 'IMC',
+    candidates: [{ type: 'css', value: 'input[name="location_other"]' }]
+  }),
+  FIELD.LOCATION,
+  'location_other autocomplete is not misclassified as procedure'
+);
 assert.strictEqual(headerAllowedForFieldKey('Procedure Notes', FIELD.SUPERVISOR), false);
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.SUPERVISOR), true);
 assert.strictEqual(headerAllowedForFieldKey('Attending Provider', FIELD.NOTES), false);

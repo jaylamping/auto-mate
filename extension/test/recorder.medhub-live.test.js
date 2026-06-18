@@ -77,6 +77,49 @@ module.exports = async function run() {
     console.log('  recorder.medhub-live: procedure "+" without search typing still records.');
   }
 
+  // Typing location then clicking an option-like decoy must not record procedure autocomplete.
+  {
+    const page3 = createPage('medhub-procedure-log-live.html');
+    const steps3 = [];
+    page3.RECORDER.start((step) => steps3.push(step));
+    const loc = page3.document.querySelector('input[name="location_other"]');
+    const decoy = page3.document.createElement('div');
+    decoy.className = 'optionDiv';
+    decoy.textContent = 'Decoy pick';
+    page3.document.body.appendChild(decoy);
+    typeValue(page3.window, loc, 'IMC');
+    await sleep(20);
+    clickEl(page3.window, decoy);
+    page3.RECORDER.stop();
+    assert.ok(
+      !steps3.some(
+        (s) =>
+          s.role === 'autocomplete' &&
+          (s.candidates || []).some((c) => /location_other/.test(String(c.value || '')))
+      ),
+      'location typing + option-like click must not emit autocomplete'
+    );
+    console.log('  recorder.medhub-live: location typing is not misclassified as procedure autocomplete.');
+  }
+
+  // Calendar change on procedure_date records as Procedure Date.
+  {
+    const page4 = createPage('medhub-procedure-log-live.html');
+    const steps4 = [];
+    page4.RECORDER.start((step) => steps4.push(step));
+    const date = page4.document.querySelector('input[name="procedure_date"]');
+    date.focus();
+    date.value = '01/15/2026';
+    date.dispatchEvent(new page4.window.Event('change', { bubbles: true }));
+    page4.RECORDER.stop();
+    const dateStep = steps4.find(
+      (s) => s.role === 'input' && (s.candidates || []).some((c) => /procedure_date/.test(c.value))
+    );
+    assert.ok(dateStep, 'date change recorded');
+    assert.strictEqual(dateStep.text, 'Procedure Date', 'date step labeled for mapping');
+    console.log('  recorder.medhub-live: procedure_date change records as Procedure Date.');
+  }
+
   // ---- Supervisor Search tab: generic input[name="searchterms"] ----
   {
     const page = createPage('medhub-procedure-log-live.html');

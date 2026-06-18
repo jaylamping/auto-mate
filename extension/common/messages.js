@@ -29,7 +29,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '15';
+  const BUILD_ID = '16';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -178,13 +178,29 @@
     return false;
   }
 
+  function isDateCandidates(candidates) {
+    const hay = candidateHaystack(candidates);
+    return /procedure_date|procedure[_-]date|\bproc[_-]date\b|datepicker_icon|hasdatepicker/.test(hay);
+  }
+
+  function isLocationCandidates(candidates) {
+    const hay = candidateHaystack(candidates);
+    if (/procedures_searchterms|proc_search/.test(hay)) return false;
+    return /location_other|locationid|\[name="location_other"\]|\[name="locationid"\]/i.test(hay);
+  }
+
+  function isProcedureFieldCandidates(candidates) {
+    const hay = candidateHaystack(candidates);
+    return /procedures_searchterms|proc_search|#procsearch|procedures_list/.test(hay);
+  }
+
   /** Guess logical field from label / accessible name only (not cell values). */
   function guessFieldFromLabel(text, role) {
     const hay = String(text || '').toLowerCase();
     if (!hay) return '';
     if (role === ROLE.SUBMIT) return FIELD.SUBMIT;
     if (role === ROLE.CLICK) return FIELD.CLICK;
-    if (/procedure\s*date|date of service|\bdos\b/.test(hay)) return FIELD.DATE;
+    if (/procedure[_\s-]*date|date of service|\bdos\b/.test(hay)) return FIELD.DATE;
     if (/^date\b|\bdate\b/.test(hay) && !/update/.test(hay)) return FIELD.DATE;
     if (/location|site|facility/.test(hay)) return FIELD.LOCATION;
     if (/supervis|attending|precept/.test(hay)) return FIELD.SUPERVISOR;
@@ -205,6 +221,9 @@
   /** Label first; only use short typed prefixes from sampleValue when label is empty. */
   function autoGuessField(step) {
     if (isSupervisorSearchCandidates(step.candidates)) return FIELD.SUPERVISOR;
+    if (isDateCandidates(step.candidates)) return FIELD.DATE;
+    if (isLocationCandidates(step.candidates)) return FIELD.LOCATION;
+    if (isProcedureFieldCandidates(step.candidates)) return FIELD.PROCEDURE;
     const fromLabel = guessFieldFromLabel(step.text, step.role);
     if (fromLabel) return fromLabel;
     const sample = String(step.sampleValue || '');
@@ -212,7 +231,6 @@
       const fromValue = guessFieldFromLabel(sample, step.role);
       if (fromValue) return fromValue;
     }
-    if (step.role === ROLE.AUTOCOMPLETE) return FIELD.PROCEDURE;
     return '';
   }
 
@@ -259,6 +277,9 @@
     guessFieldFromLabel,
     autoGuessField,
     isSupervisorSearchCandidates,
+    isDateCandidates,
+    isLocationCandidates,
+    isProcedureFieldCandidates,
     headerAllowedForFieldKey,
     isNotesLikeHeader,
     isSupervisorLikeHeader

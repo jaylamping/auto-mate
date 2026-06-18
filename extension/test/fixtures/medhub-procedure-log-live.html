@@ -225,6 +225,28 @@
           if (e.key === 'Escape' || e.keyCode === 27) closeCal();
         });
         dateInput.addEventListener('blur', closeCal);
+        dateInput.classList.add('hasDatepicker');
+
+        // Minimal jQuery UI datepicker hook used by fillDateField on replay.
+        window.jQuery = window.$ = function (sel) {
+          var el = typeof sel === 'string' ? document.querySelector(sel) : sel;
+          var api = {
+            datepicker: function (action, val) {
+              if (action === 'setDate') {
+                el.value = val;
+                el.dispatchEvent(new Event('change', { bubbles: true }));
+              } else if (action === 'hide') {
+                closeCal();
+              }
+              return api;
+            },
+            data: function (key) {
+              if (key === 'datepicker' && el.classList.contains('hasDatepicker')) return {};
+              return null;
+            }
+          };
+          return api;
+        };
 
         function checkLocation(menu) {
           var other = document.querySelector('[name="location_other"]');

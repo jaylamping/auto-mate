@@ -203,7 +203,7 @@
       el,
       value,
       candidates: DOM.generateCandidateSelectors(el),
-      text: supervisorFieldText(el),
+      text: mappedFieldText(el),
       ts: Date.now(),
       stepId: null,
       emitted: false
@@ -240,7 +240,7 @@
       role: ROLE.INPUT,
       candidates: DOM.generateCandidateSelectors(el),
       sampleValue: value,
-      text: supervisorFieldText(el),
+      text: mappedFieldText(el),
       tag,
       blurred: Boolean(opts.blurred),
       debounced: Boolean(opts.debounced)
@@ -354,6 +354,34 @@
     });
   }
 
+  function isDateField(el) {
+    if (!el) return false;
+    const cls = el.className && typeof el.className === 'string' ? el.className : '';
+    if (/datepicker|hasdatepicker/i.test(cls)) return true;
+    const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
+    return /procedure[_\s-]*date|date of service|\bdos\b/.test(hay);
+  }
+
+  function isLocationField(el) {
+    if (!el) return false;
+    const tag = el.tagName && el.tagName.toLowerCase();
+    const hay = `${el.id || ''} ${el.name || ''}`.toLowerCase();
+    if (/location_other|locationid/.test(hay)) return true;
+    if (tag === 'select' && el.name === 'locationID') return true;
+    return false;
+  }
+
+  function isAutocompleteTypingField(el) {
+    return isProcedureSearchField(el) || isSupervisorSearchInput(el);
+  }
+
+  function mappedFieldText(el) {
+    if (isDateField(el)) return 'Procedure Date';
+    if (isLocationField(el)) return 'Location';
+    if (isSupervisorSearchInput(el)) return 'Supervisor';
+    return fieldText(el);
+  }
+
   function isSupervisorSearchInput(el) {
     if (!el) return false;
     const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
@@ -365,10 +393,6 @@
 
   function isInSupervisorPane(el) {
     return !!(el && el.closest && el.closest('#procedures_supervisor_pane'));
-  }
-
-  function supervisorFieldText(el) {
-    return isSupervisorSearchInput(el) ? 'Supervisor' : fieldText(el);
   }
 
   function findSupervisorSearchInput() {
@@ -421,7 +445,7 @@
       clickRel: relSelector(container, el),
       sampleValue: input.value || (pendingType && pendingType.el === input ? pendingType.value : ''),
       sampleOptionText,
-      text: supervisorFieldText(input),
+      text: mappedFieldText(input),
       tag: input.tagName.toLowerCase()
     });
     if (pendingType && pendingType.el === input) {
@@ -458,6 +482,7 @@
     // element that looks like a results option.
     if (
       pendingType &&
+      isAutocompleteTypingField(pendingType.el) &&
       Date.now() - pendingType.ts < AUTOCOMPLETE_WINDOW_MS &&
       el !== pendingType.el &&
       !pendingType.el.contains(el) &&
@@ -511,9 +536,21 @@
         role: ROLE.INPUT,
         candidates: DOM.generateCandidateSelectors(el),
         sampleValue: el.value,
-        text: fieldText(el),
+        text: mappedFieldText(el),
         tag: 'select'
       });
+    } else if (isTextEntry(el) && isDateField(el)) {
+      markFieldInteracted(el);
+      const val = fieldValue(el);
+      if (!val) return;
+      emit({
+        role: ROLE.INPUT,
+        candidates: DOM.generateCandidateSelectors(el),
+        sampleValue: val,
+        text: mappedFieldText(el),
+        tag: 'input'
+      });
+      if (pendingType && pendingType.el === el) pendingType.emitted = true;
     }
   }
 
