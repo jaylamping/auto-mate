@@ -21,6 +21,7 @@
     PONG: 'faa:pong',
     STEP_RECORDED: 'faa:step-recorded',
     FIELD_INPUT: 'faa:field-input',
+    DIAG_EVENT: 'faa:diag-event',
     LEARN_DONE: 'faa:learn-done',
     ROW_PROGRESS: 'faa:row-progress',
     ROW_DONE: 'faa:row-done',
@@ -29,7 +30,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '18';
+  const BUILD_ID = '20';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -59,7 +60,7 @@
   /** Learn tab: form fields in display order. `required` = must have spreadsheet column + row value at run. */
   const FORM_FIELDS = [
     { key: FIELD.DATE, label: 'Procedure Date', required: true },
-    { key: FIELD.LOCATION, label: 'Location', required: true },
+    { key: FIELD.LOCATION, label: 'Location', required: true, columnOptional: true },
     { key: FIELD.SUPERVISOR, label: 'Supervisor', required: true },
     { key: FIELD.ENCOUNTER, label: 'Encounter', required: true },
     { key: FIELD.PROCEDURE, label: 'Procedure', required: true },
@@ -186,7 +187,29 @@
   function isLocationCandidates(candidates) {
     const hay = candidateHaystack(candidates);
     if (/procedures_searchterms|proc_search/.test(hay)) return false;
-    return /location_other|locationid|\[name="location_other"\]|\[name="locationid"\]/i.test(hay);
+    return /location_other|locationid|locationspecify|location_specify|proc_location|\[name="location"\]|\[name="location_other"\]|\[name="locationid"\]/i.test(
+      hay
+    );
+  }
+
+  /** Site codes users type into MedHub location specify / dropdown fields during Learn. */
+  const KNOWN_LOCATION_VALUES = new Set(['imc', 'cicu']);
+
+  function isKnownLocationValue(value) {
+    const key = normalizeMatchKey(value);
+    return key.length > 0 && KNOWN_LOCATION_VALUES.has(key);
+  }
+
+  function isConflictingLocationGuess(candidates) {
+    return (
+      isProcedureFieldCandidates(candidates) ||
+      isSupervisorSearchCandidates(candidates) ||
+      isEncounterCandidates(candidates) ||
+      isDateCandidates(candidates) ||
+      isNotesCandidates(candidates) ||
+      isDiagnosisCandidates(candidates) ||
+      isComplicationsCandidates(candidates)
+    );
   }
 
   function isProcedureFieldCandidates(candidates) {
@@ -280,6 +303,13 @@
     if (isComplicationsCandidates(step.candidates)) return FIELD.COMPLICATIONS;
     if (isNotesCandidates(step.candidates)) return FIELD.NOTES;
     if (isProcedureFieldCandidates(step.candidates)) return FIELD.PROCEDURE;
+    if (
+      (step.role === ROLE.INPUT || step.role === ROLE.STATIC) &&
+      isKnownLocationValue(step.sampleValue) &&
+      !isConflictingLocationGuess(step.candidates)
+    ) {
+      return FIELD.LOCATION;
+    }
     const fromLabel = guessFieldFromLabel(step.text, step.role);
     if (fromLabel) return fromLabel;
     const sample = String(step.sampleValue || '');
@@ -343,6 +373,7 @@
     isNotesCandidates,
     isLocationDropdownCandidates,
     toMedHubDateString,
+    isKnownLocationValue,
     isProcedureFieldCandidates,
     headerAllowedForFieldKey,
     isNotesLikeHeader,

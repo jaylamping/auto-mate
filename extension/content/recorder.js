@@ -9,11 +9,14 @@
  */
 (function (root) {
   const DOM = root.FAA_DOM;
-  const { ROLE, minMappingLenFromHaystack } = root.FAA_MSG;
+  const { ROLE, minMappingLenFromHaystack, autoGuessField } = root.FAA_MSG;
 
   let active = false;
   let onStep = null;
   let onLiveInput = null;
+  let onDiag = null;
+  let diagStartTs = 0;
+  let diagSeq = 0;
   let stepSeq = 0;
   let liveInputTimer = null;
   const LIVE_INPUT_MS = 300;
@@ -41,8 +44,23 @@
   function valueChangedSinceFocus(el) {
     if (!el) return false;
     const baseline = fieldFocusValue.get(el);
-    if (baseline === undefined) return false;
+    if (baseline === undefined) return fieldValue(el).length > 0;
     return fieldValue(el) !== baseline;
+  }
+
+  function ensureLocationOtherEnabledForLearn() {
+    const other = document.querySelector('input[name="location_other"]');
+    if (!other || !other.disabled) return other;
+    const sel = document.querySelector('select[name="locationID"]');
+    if (!sel) return other;
+    for (const opt of sel.options) {
+      if ((opt.value || '') === '') {
+        if (sel.value !== opt.value) sel.value = opt.value;
+        other.disabled = false;
+        return other;
+      }
+    }
+    return other;
   }
 
   function isTextEntry(el) {
@@ -142,6 +160,104 @@
     if (onStep) onStep(step);
   }
 
+  // ---- Diagnostic capture (raw, complete interaction log) ----
+  // Independent of the inference layer above: records every focus/change/blur/
+  // click/submit with full element metadata and auto-mate's field guess, so the
+  // user can export a session log and we can verify each field mapped correctly.
+  function describeElement(el) {
+    if (!el || el.nodeType !== 1) return null;
+    const tag = el.tagName.toLowerCase();
+    return {
+      tag,
+      type: (el.getAttribute && (el.getAttribute('type') || '')) || '',
+      id: el.id || '',
+      name: (el.getAttribute && el.getAttribute('name')) || '',
+      ariaLabel: (el.getAttribute && el.getAttribute('aria-label')) || '',
+      placeholder: (el.getAttribute && el.getAttribute('placeholder')) || '',
+      accessibleName: fieldText(el),
+      disabled: !!el.disabled,
+      candidates: DOM.generateCandidateSelectors(el)
+    };
+  }
+
+  function selectedOptionText(el) {
+    if (el && el.tagName && el.tagName.toLowerCase() === 'select') {
+      const opt = el.options && el.options[el.selectedIndex];
+      return opt ? (opt.textContent || '').trim() : '';
+    }
+    return '';
+  }
+
+  function logDiag(eventType, el, extra = {}) {
+    if (!onDiag || !el || el.nodeType !== 1) return;
+    const element = describeElement(el);
+    if (!element) return;
+    const tag = element.tag;
+    const fieldLike = isTextEntry(el) || tag === 'select';
+    const value = extra.value !== undefined ? extra.value : fieldLike ? fieldValue(el) : '';
+    const guessLabel = fieldLike ? mappedFieldText(el) : '';
+    let guessField = '';
+    if (fieldLike) {
+      try {
+        guessField =
+          autoGuessField({
+            role: ROLE.INPUT,
+            text: guessLabel,
+            sampleValue: value,
+            candidates: element.candidates
+          }) || '';
+      } catch (_) {}
+    }
+    onDiag({
+      seq: ++diagSeq,
+      t: Date.now() - diagStartTs,
+      event: eventType,
+      value,
+      optionText: extra.optionText !== undefined ? extra.optionText : selectedOptionText(el),
+      guessLabel,
+      guessField,
+      element
+    });
+  }
+
+  function diagFocusIn(e) {
+    if (!active || !onDiag) return;
+    const el = e.target;
+    const tag = el.tagName && el.tagName.toLowerCase();
+    if (!isTextEntry(el) && tag !== 'select') return;
+    logDiag('focus', el);
+  }
+
+  function diagChange(e) {
+    if (!active || !onDiag) return;
+    logDiag('change', e.target);
+  }
+
+  function diagBlur(e) {
+    if (!active || !onDiag) return;
+    const el = e.target;
+    const tag = el.tagName && el.tagName.toLowerCase();
+    if (!isTextEntry(el) && tag !== 'select') return;
+    logDiag('blur', el);
+  }
+
+  function diagClick(e) {
+    if (!active || !onDiag) return;
+    const target =
+      (e.target.closest &&
+        e.target.closest('a,button,[role="button"],[role="option"],li,input,select,td,div,span')) ||
+      e.target;
+    logDiag('click', target, {
+      value: (target.textContent || target.value || '').trim().slice(0, 160),
+      optionText: ''
+    });
+  }
+
+  function diagSubmit(e) {
+    if (!active || !onDiag) return;
+    logDiag('submit', e.target, { value: '', optionText: '' });
+  }
+
   // Build a generalized selector for an autocomplete option element so any
   // future option in the same list can be located, then matched by text.
   function optionContainerSelector(optionEl) {
@@ -184,6 +300,7 @@
     const el = e.target;
     const tag = el.tagName.toLowerCase();
     if (!isTextEntry(el) && tag !== 'select') return;
+    if (isLocationField(el) && el.name === 'location_other') ensureLocationOtherEnabledForLearn();
     rememberFocusValue(el);
   }
 
@@ -191,6 +308,7 @@
     if (!active) return;
     const el = e.target;
     if (!isTextEntry(el)) return;
+    if (isLocationField(el) && el.name === 'location_other') ensureLocationOtherEnabledForLearn();
     markFieldInteracted(el);
     // If typing has moved to a different field without an intervening click
     // (e.g. tabbing between inputs), flush the previous field as a plain input
@@ -366,8 +484,11 @@
     if (!el) return false;
     const tag = el.tagName && el.tagName.toLowerCase();
     const hay = `${el.id || ''} ${el.name || ''}`.toLowerCase();
-    if (/location_other|locationid/.test(hay)) return true;
+    if (/location_other|locationid|locationspecify|location_specify|proc_location/.test(hay)) return true;
+    if (el.name === 'location') return true;
     if (tag === 'select' && el.name === 'locationID') return true;
+    const label = fieldText(el).toLowerCase();
+    if (/^location\b|select location/.test(label)) return true;
     return false;
   }
 
@@ -600,11 +721,14 @@
     if (isTextEntry(el)) markFieldInteracted(el);
   }
 
-  function start(cb, liveCb) {
+  function start(cb, liveCb, diagCb) {
     if (active) return;
     active = true;
     onStep = cb;
     onLiveInput = liveCb || null;
+    onDiag = diagCb || null;
+    diagStartTs = Date.now();
+    diagSeq = 0;
     stepSeq = 0;
     pendingType = null;
     liveInputTimer = null;
@@ -616,6 +740,11 @@
     document.addEventListener('change', handleChange, true);
     document.addEventListener('blur', handleBlur, true);
     document.addEventListener('click', handleClick, true);
+    document.addEventListener('focusin', diagFocusIn, true);
+    document.addEventListener('change', diagChange, true);
+    document.addEventListener('blur', diagBlur, true);
+    document.addEventListener('click', diagClick, true);
+    document.addEventListener('submit', diagSubmit, true);
   }
 
   function stop() {
@@ -624,6 +753,7 @@
     active = false;
     onStep = null;
     onLiveInput = null;
+    onDiag = null;
     if (liveInputTimer) clearTimeout(liveInputTimer);
     liveInputTimer = null;
     pendingType = null;
@@ -633,6 +763,11 @@
     document.removeEventListener('change', handleChange, true);
     document.removeEventListener('blur', handleBlur, true);
     document.removeEventListener('click', handleClick, true);
+    document.removeEventListener('focusin', diagFocusIn, true);
+    document.removeEventListener('change', diagChange, true);
+    document.removeEventListener('blur', diagBlur, true);
+    document.removeEventListener('click', diagClick, true);
+    document.removeEventListener('submit', diagSubmit, true);
   }
 
   root.FAA_RECORDER = { start, stop, isActive: () => active };

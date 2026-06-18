@@ -69,7 +69,7 @@ assert.strictEqual(
 );
 assert.strictEqual(
   autoGuessField({
-    role: ROLE.AUTOCOMPLETE,
+    role: ROLE.INPUT,
     text: '',
     sampleValue: 'IMC',
     candidates: [{ type: 'css', value: 'input[name="location_other"]' }]
@@ -77,6 +77,28 @@ assert.strictEqual(
   FIELD.LOCATION,
   'location_other autocomplete is not misclassified as procedure'
 );
+assert.strictEqual(
+  autoGuessField({
+    role: ROLE.INPUT,
+    text: '',
+    sampleValue: 'IMC',
+    candidates: [{ type: 'css', value: '#proc_location' }]
+  }),
+  FIELD.LOCATION,
+  'typing IMC into a generic location input is recognized as location'
+);
+assert.strictEqual(
+  autoGuessField({
+    role: ROLE.INPUT,
+    text: '',
+    sampleValue: 'IMC',
+    candidates: [{ type: 'css', value: 'input[name="procedures_searchterms"]' }]
+  }),
+  FIELD.PROCEDURE,
+  'IMC in procedure search field stays procedure'
+);
+assert.strictEqual(root.FAA_MSG.isKnownLocationValue('IMC'), true);
+assert.strictEqual(root.FAA_MSG.isKnownLocationValue('Colonoscopy'), false);
 assert.strictEqual(
   autoGuessField({
     role: ROLE.INPUT,

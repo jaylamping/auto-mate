@@ -6,7 +6,7 @@
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
 (function () {
-  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isLocationDropdownCandidates, isEncounterCandidates, isGenderCandidates, isAgeCandidates, isDiagnosisCandidates, isComplicationsCandidates, isNotesCandidates, isProcedureFieldCandidates } = window.FAA_MSG;
+  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isLocationDropdownCandidates, isEncounterCandidates, isGenderCandidates, isAgeCandidates, isDiagnosisCandidates, isComplicationsCandidates, isNotesCandidates, isProcedureFieldCandidates, isKnownLocationValue } = window.FAA_MSG;
   const PARSER = window.FAA_PARSER;
   const REPORT = window.FAA_REPORT;
 
@@ -31,7 +31,9 @@
     reportFilter: 'all',
     awaitingLiveConfirm: false,
     dataFileName: '',
-    runTabId: null
+    runTabId: null,
+    diagEvents: [],
+    diagMeta: null
   };
 
   let persistDataSessionTimer = null;
@@ -209,7 +211,34 @@
   }
 
   function isColumnMappingComplete() {
-    return REQUIRED_FIELD_KEYS.every((f) => state.mapping[f]);
+    return REQUIRED_FIELD_KEYS.every((f) => isFieldMappingSatisfied(f));
+  }
+
+  function isColumnOptionalField(mapKey) {
+    const def = FORM_FIELDS.find((f) => f.key === mapKey);
+    return Boolean(def && def.columnOptional);
+  }
+
+  function staticValueForField(mapKey) {
+    const binding = state.formBindings[mapKey];
+    if (!binding) return '';
+    return fieldValueForMapping(binding);
+  }
+
+  function defaultStaticLocation() {
+    if (state.mapping[FIELD.LOCATION]) return null;
+    const fromBinding = staticValueForField(FIELD.LOCATION);
+    if (fromBinding) return fromBinding;
+    const step = (state.recipe?.steps || []).find((s) => s.field === FIELD.LOCATION);
+    if (step?.staticValue) return String(step.staticValue);
+    if (step?.sampleValue) return String(step.sampleValue);
+    return 'IMC';
+  }
+
+  function isFieldMappingSatisfied(mapKey) {
+    if (state.mapping[mapKey]) return true;
+    if (isColumnOptionalField(mapKey) && staticValueForField(mapKey)) return true;
+    return false;
   }
 
   /** Next when user documented once (selectors) and required columns are mapped. */
@@ -264,10 +293,55 @@
     try {
       await sendToTab(MSG.START_LEARN);
       state.learnRecording = true;
+      state.diagEvents = [];
+      const tab = await getActiveTab();
+      state.diagMeta = {
+        url: tab ? tab.url : '',
+        startedAt: new Date().toISOString(),
+        buildId: BUILD_ID,
+        dataFile: state.dataFileName || ''
+      };
+      updateDiagExportUI();
       refreshMappingListeningBadge();
     } catch (_) {
       /* toast already shown */
     }
+  }
+
+  function updateDiagExportUI() {
+    const wrap = $('#diagExportWrap');
+    if (!wrap) return;
+    const count = state.diagEvents.length;
+    wrap.classList.toggle('hidden', count === 0);
+    const countEl = $('#diagCount');
+    if (countEl) countEl.textContent = String(count);
+  }
+
+  function buildSessionLog() {
+    return JSON.stringify(
+      {
+        meta: {
+          ...(state.diagMeta || {}),
+          exportedAt: new Date().toISOString(),
+          eventCount: state.diagEvents.length,
+          appVersion: (chrome.runtime.getManifest && chrome.runtime.getManifest().version) || ''
+        },
+        spreadsheetHeaders: state.parsed ? state.parsed.headers : [],
+        mapping: state.mapping,
+        inferredSteps: state.recordedSteps.map((s) => ({
+          field: s._field || '',
+          role: s.role,
+          text: s.text || '',
+          sampleValue: s.sampleValue || '',
+          sampleOptionText: s.sampleOptionText || '',
+          optionSelector: s.optionSelector || '',
+          candidates: s.candidates || []
+        })),
+        events: state.diagEvents
+      },
+      null,
+      2
+    );
   }
 
   async function stopLearnRecording() {
@@ -284,6 +358,7 @@
     rebuildFieldRevealOrderFromState();
     renderFormMapping();
     refreshMappingListeningBadge();
+    updateDiagExportUI();
     if (REQUIRED_FIELD_KEYS.some((f) => state.mapping[f])) {
       rebuildEngineRows();
     } else {
@@ -381,7 +456,7 @@
       return;
     }
     if (!isColumnMappingComplete()) {
-      toast('Map all required spreadsheet columns before continuing.');
+      toast('Map all required fields before continuing.');
       return;
     }
     inferMappingFromLearn();
@@ -443,6 +518,10 @@
       case MSG.FIELD_INPUT:
         onLiveFieldInput(message.payload);
         break;
+      case MSG.DIAG_EVENT:
+        state.diagEvents.push(message.payload);
+        updateDiagExportUI();
+        break;
       case MSG.ACTION_LOG:
         onActionLog(message.payload);
         break;
@@ -480,6 +559,7 @@
   }
 
   function shouldInferColumnMapping(mapKey, step) {
+    if (mapKey === FIELD.LOCATION && isKnownLocationValue(fieldValueForMapping(step))) return false;
     const val = fieldValueForMapping(step);
     const minLen = mapKey
       ? minColumnInferLenForFieldKey(mapKey)
@@ -565,7 +645,7 @@
 
     if (!wasRevealed || bindingChanged || step.blurred) {
       renderFormMapping();
-      if (mapKey === FIELD.PROCEDURE) flashColField(mapKey);
+      if (mapKey === FIELD.PROCEDURE || mapKey === FIELD.LOCATION) flashColField(mapKey);
       refreshLearnStepNav();
     }
   }
@@ -615,10 +695,17 @@
     if (!state.parsed) return;
     const field = sel.dataset.colMap;
     const prev = state.mapping[field];
+    const staticVal = isColumnOptionalField(field) ? staticValueForField(field) : '';
     sel.innerHTML = '';
+    if (staticVal) {
+      const fixed = document.createElement('option');
+      fixed.value = '__static__';
+      fixed.textContent = `(fixed — ${staticVal})`;
+      sel.appendChild(fixed);
+    }
     const none = document.createElement('option');
     none.value = '';
-    none.textContent = '(pick column)';
+    none.textContent = staticVal ? '(pick spreadsheet column instead)' : '(pick column)';
     sel.appendChild(none);
     state.parsed.headers.forEach((h) => {
       const owner = columnOwnerField(h, field);
@@ -627,10 +714,10 @@
       o.textContent = owner ? `${h} (→ ${formLabelForKey(owner)})` : h;
       sel.appendChild(o);
     });
-    sel.value = prev || '';
+    sel.value = prev || (staticVal ? '__static__' : '');
     sel.onchange = () => {
       const v = sel.value;
-      if (!v) {
+      if (!v || v === '__static__') {
         delete state.mapping[field];
         rebuildEngineRows();
         refreshLearnStepNav();
@@ -646,6 +733,13 @@
       return (
         `<div class="map-field-col-wrap map-field-col-mapped">` +
         `<span class="map-field-check" title="Procedure input registered" aria-label="Procedure input registered">` +
+        `<span class="map-field-check-icon" aria-hidden="true">✓</span></span></div>`
+      );
+    }
+    if (isColumnOptionalField(key) && staticValueForField(key) && !state.mapping[key]) {
+      return (
+        `<div class="map-field-col-wrap map-field-col-mapped">` +
+        `<span class="map-field-check" title="Location set during Learn" aria-label="Location set during Learn">` +
         `<span class="map-field-check-icon" aria-hidden="true">✓</span></span></div>`
       );
     }
@@ -751,13 +845,15 @@
           ? s.staticValue
           : s.sampleValue
         : undefined;
+    const sampleValue = s._field === FIELD.LOCATION ? s.sampleValue || staticValue : undefined;
     return {
       field: s._field,
       role,
       candidates: s.candidates || [],
       optionSelector: s.optionSelector,
       clickRel: s.clickRel,
-      staticValue
+      staticValue,
+      sampleValue
     };
   }
 
@@ -924,7 +1020,10 @@
 
   function rebuildEngineRows() {
     if (!state.parsed) return;
-    state.engineRows = PARSER.buildEngineRows(state.parsed, state.mapping, { location: 'IMC' });
+    const staticLocation = defaultStaticLocation();
+    state.engineRows = PARSER.buildEngineRows(state.parsed, state.mapping, {
+      location: staticLocation == null ? 'IMC' : staticLocation
+    });
     refreshRunReadiness();
     refreshLearnStepNav();
   }
@@ -1225,6 +1324,13 @@
   $('#btnExportJson').addEventListener('click', () => {
     if (!state.session) return toast('No session to export.');
     REPORT.download(`auto-mate-report-${stamp()}.json`, REPORT.toJSON(state.session), 'application/json');
+  });
+
+  $('#btnExportSession').addEventListener('click', () => {
+    if (!state.diagEvents.length) {
+      return toast('Nothing captured yet — fill the form during Learn first.');
+    }
+    REPORT.download(`auto-mate-session-${stamp()}.json`, buildSessionLog(), 'application/json');
   });
 
   function stamp() {

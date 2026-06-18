@@ -76,7 +76,8 @@
       case MSG.START_LEARN:
         RECORDER.start(
           (step) => toPanel(MSG.STEP_RECORDED, step),
-          (live) => toPanel(MSG.FIELD_INPUT, live)
+          (live) => toPanel(MSG.FIELD_INPUT, live),
+          (diag) => toPanel(MSG.DIAG_EVENT, diag)
         );
         sendResponse({ ok: true });
         return true;

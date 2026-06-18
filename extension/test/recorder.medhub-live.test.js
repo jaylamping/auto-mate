@@ -19,6 +19,7 @@ module.exports = async function run() {
   // Date + location_other (OTHER specify box)
   typeValue(window, document.querySelector('input[name="procedure_date"]'), '06/17/2026');
   typeValue(window, document.querySelector('input[name="location_other"]'), 'IMC');
+  document.querySelector('input[name="location_other"]').dispatchEvent(new window.FocusEvent('blur', { bubbles: true }));
 
   // Supervisor via the List <select>
   const sup = document.querySelector('select[name="supervisorID"]');
@@ -57,6 +58,13 @@ module.exports = async function run() {
     (s) => s.role === 'input' && (s.candidates || []).some((c) => /supervisorID/.test(c.value))
   );
   assert.ok(supInput, 'supervisor List <select> change recorded as an input step');
+
+  const locStep = steps.find(
+    (s) => s.role === 'input' && (s.candidates || []).some((c) => /location_other/.test(c.value))
+  );
+  assert.ok(locStep, 'location_other recorded when user types IMC');
+  assert.strictEqual(locStep.text, 'Location', 'IMC typed into location field labeled Location');
+  assert.strictEqual(locStep.sampleValue, 'IMC', 'location sample value preserved');
 
   const mrnStep = steps.find(
     (s) => s.role === 'input' && (s.candidates || []).some((c) => /patientID_other/.test(c.value))
