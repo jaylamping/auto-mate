@@ -52,10 +52,44 @@
     }
   }
 
+  // MedHub's Procedure Date is a jQuery UI datepicker (class="datepicker_icon").
+  // Focusing/typing opens a #ui-datepicker-div calendar overlay; if left open it
+  // can sit on top of the next control and swallow the click. We type the value
+  // directly (robust + locale-proof) and then explicitly dismiss the calendar.
+  function isDatePickerField(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const cls = el.className && typeof el.className === 'string' ? el.className : '';
+    if (/datepicker|hasdatepicker|flatpickr/i.test(cls)) return true;
+    const hay = `${el.getAttribute('name') || ''} ${el.id || ''}`;
+    return /(^|[_\s-])date($|[_\s-])/i.test(hay);
+  }
+
+  function dismissDatePicker(el) {
+    // Escape closes the jQuery UI datepicker; blur is the secondary dismissal.
+    try {
+      el.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: 'Escape', keyCode: 27, which: 27 }));
+    } catch (_) {}
+    try {
+      if (typeof el.blur === 'function') el.blur();
+    } catch (_) {}
+    // Hard fallback: force-hide any lingering calendar overlay so it can't
+    // intercept the next click.
+    const widgetSelectors = ['#ui-datepicker-div', '.ui-datepicker', '.flatpickr-calendar.open', '.datepicker-dropdown'];
+    for (const sel of widgetSelectors) {
+      try {
+        document.querySelectorAll(sel).forEach((w) => {
+          if (w.classList) w.classList.remove('open');
+          if (w.style) w.style.display = 'none';
+        });
+      } catch (_) {}
+    }
+  }
+
   async function typeInto(el, value, opts = {}) {
     const charDelayMs = opts.charDelayMs != null ? opts.charDelayMs : 0;
     if (charDelayMs > 0) {
       await typeChars(el, String(value), charDelayMs);
+      if (isDatePickerField(el)) dismissDatePicker(el);
       return;
     }
     el.focus();
@@ -69,6 +103,7 @@
     }
     fireInput(el);
     fireKeystrokes(el);
+    if (isDatePickerField(el)) dismissDatePicker(el);
   }
 
   /** Type one character at a time so autocompletes can filter incrementally. */
@@ -137,8 +172,13 @@
   function findSupervisorListSelect() {
     const byId = document.getElementById('supSelect');
     if (byId && DOM.isVisible(byId)) return byId;
-    const pane = document.getElementById('supListPane');
-    if (pane) {
+    // Live MedHub: the List tab pane holds <select name="supervisorID">.
+    const live = document.querySelector('#procedures_supervisor_pane select[name="supervisorID"], select[name="supervisorID"]');
+    if (live && DOM.isVisible(live)) return live;
+    const panes = ['supListPane', 'procedures_supervisor_pane'];
+    for (const id of panes) {
+      const pane = document.getElementById(id);
+      if (!pane) continue;
       const sel = pane.querySelector('select');
       if (sel && DOM.isVisible(sel)) return sel;
     }
@@ -153,9 +193,14 @@
       if (supervisorNamesMatch(label, query) || supervisorNamesMatch(val, query)) {
         setNativeValue(selectEl, opt.value);
         fireInput(selectEl);
+        // Idealized fixture mirrors the chosen label into a hidden field.
+        // Live MedHub instead wires the <select> onchange to a hidden userID,
+        // so only update the hidden field when it actually exists.
         const hidden = document.getElementById('supChosen');
-        if (hidden) setNativeValue(hidden, label || val);
-        fireInput(hidden);
+        if (hidden) {
+          setNativeValue(hidden, label || val);
+          fireInput(hidden);
+        }
         return label || val;
       }
     }
@@ -163,9 +208,12 @@
   }
 
   function findSupervisorSearchTab() {
-    const byId = document.getElementById('supTabSearch');
+    const byId = document.getElementById('supTabSearch') || document.getElementById('supervisor_tab_2');
     if (byId) return byId;
-    const tabs = document.querySelector('.sup-tabs');
+    // Live MedHub: tab links call procedures_supervisor_tab('search', ...).
+    const byHandler = document.querySelector('[onclick*="procedures_supervisor_tab(\'search\'"]');
+    if (byHandler) return byHandler;
+    const tabs = document.querySelector('.sup-tabs, .mhSubTabs');
     if (!tabs) return null;
     for (const link of tabs.querySelectorAll('a, button, [role="tab"]')) {
       if (normalizeMatchKey(link.textContent) === 'search') return link;
@@ -200,7 +248,11 @@
   }
 
   function findSupervisorSearchInput() {
-    const byId = document.getElementById('supSearch') || document.getElementById('sup_search');
+    const byId =
+      document.getElementById('supSearch') ||
+      document.getElementById('sup_search') ||
+      document.getElementById('supervisor_search') ||
+      document.querySelector('input[name="supervisor_search"]');
     if (byId && isTextEntry(byId)) return byId;
     const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])');
     for (const el of nodes) {
@@ -299,12 +351,20 @@
 
   function isSkippableSupervisorNavClick(step) {
     if (step.role !== ROLE.CLICK) return false;
-    if ((step.candidates || []).some((c) => /supTabSearch/i.test(String(c.value || '')))) return true;
+    if (
+      (step.candidates || []).some((c) =>
+        /supTabSearch|supervisor_tab_2|procedures_supervisor_tab\('search'/i.test(String(c.value || ''))
+      )
+    ) {
+      return true;
+    }
     const el = DOM.resolveElement(step.candidates);
     if (!el) return false;
     const id = (el.id || '').toLowerCase();
-    if (id === 'suptabsearch') return true;
-    if (normalizeMatchKey(el.textContent) === 'search' && el.closest('.sup-tabs')) return true;
+    if (id === 'suptabsearch' || id === 'supervisor_tab_2') return true;
+    const onclick = (el.getAttribute && el.getAttribute('onclick')) || '';
+    if (/procedures_supervisor_tab\('search'/i.test(onclick)) return true;
+    if (normalizeMatchKey(el.textContent) === 'search' && el.closest('.sup-tabs, .mhSubTabs')) return true;
     return false;
   }
 
@@ -430,6 +490,9 @@
     const selectors = [
       '#selectedProcs tr.selected_proc',
       '#selectedProcs .selected_proc',
+      // Live MedHub: filled procedure rows are <tr id="prow_N"> (un-hidden);
+      // empty slots keep the `hidden` class and prow_0 is the placeholder.
+      '#selected_procedures tr[id^="prow_"]:not(.hidden)',
       '#selected_procedures li.proc_chip',
       '#selected_procedures li',
       'tr.selected_proc',
@@ -438,7 +501,7 @@
     for (const sel of selectors) {
       try {
         for (const row of document.querySelectorAll(sel)) {
-          if (!row || row.id === 'noProcRow' || seen.has(row)) continue;
+          if (!row || row.id === 'noProcRow' || row.id === 'prow_0' || seen.has(row)) continue;
           seen.add(row);
           rows.push(row);
         }

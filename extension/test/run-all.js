@@ -21,7 +21,9 @@ async function main() {
     ['recorder.dom', './recorder.dom.test.js'],
     ['engine.dom', './engine.dom.test.js'],
     ['recorder.medhub', './recorder.medhub.test.js'],
-    ['engine.medhub', './engine.medhub.test.js']
+    ['engine.medhub', './engine.medhub.test.js'],
+    ['recorder.medhub-live', './recorder.medhub-live.test.js'],
+    ['engine.medhub-live', './engine.medhub-live.test.js']
   ];
 
   for (const [name, mod] of suites) {

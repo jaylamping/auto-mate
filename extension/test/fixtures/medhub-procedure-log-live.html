@@ -1,0 +1,346 @@
+<!--
+  LIVE MedHub "Log Procedure/Case" form, captured from the client's real page
+  (ahc.medhub.com .../procedures_update flow, form name="procedureform").
+
+  Unlike medhub-procedure-log.html (an idealized reconstruction with friendly
+  ids like #supSelect / #procSearch), this fixture mirrors the ACTUAL markup the
+  recorder/engine must cope with:
+
+    - Procedure Date : <input name="procedure_date" class="datepicker_icon">  (no id)
+    - Location       : <select name="locationID"> (+ <input name="location_other">)
+    - Supervisor     : tabbed widget driven by procedures_supervisor_tab('list'|'search'|'other', ...)
+                       List pane: <div id="procedures_supervisor_pane"><select name="supervisorID">
+                       Hidden state: supervisor_method / supervisor_search_userID / supervisor_other_save
+    - Encounter/MRN  : <select name="patientID"> (+ <input name="patientID_other" id="patientID_other">)
+    - Patient Gender : <select name="patient_gender">
+    - Patient Age    : <select name="patient_age">
+    - Procedures     : selected rows live in <table id="selected_procedures"> as
+                       hidden <tr id="prow_1..5"> that get un-hidden by procedures_add(...)
+                       and removed by procedures_delete(n). The "Add Standard
+                       Procedure" picker is <input id="procedures_searchterms"
+                       onkeyup="procedures_search()"> over <div id="procedures_list">
+                       whose rows are <tr> with an "+" <a onClick="procedures_add(...)">.
+    - Submit         : <input type="submit"> inside form "procedureform".
+
+  The inline script reproduces the live helpers (procedures_supervisor_tab,
+  procedures_add, procedures_delete, procedures_search, checkLocation) closely
+  enough for the recorder and engine to be exercised end to end.
+-->
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8" /><title>Log Procedure/Case - MedHub</title></head>
+  <body>
+    <h1>Log Procedure/Case</h1>
+    <form action="/functions/common/procedures_update.mh" method="POST" name="procedureform" id="procedureform">
+      <input type="hidden" name="userID" value="107227" />
+      <input type="hidden" name="action" value="add" />
+      <input type="hidden" name="programID" value="86" />
+      <input type="hidden" name="procedureMax" value="5" />
+      <input type="hidden" name="batchFlag" value="0" />
+
+      <h2 class="mhSectionHeader">Background Information</h2>
+
+      <table class="fullscreen">
+        <tr>
+          <td colspan="2">Procedure Date:<sup class="red">*</sup>&nbsp;</td>
+          <td colspan="3">
+            <input type="text" name="procedure_date" maxlength="10" value="06/17/2026" class="datepicker_icon" />
+          </td>
+        </tr>
+        <tr>
+          <td class="v-top" colspan="2">Location:<sup class="red">*</sup></td>
+          <td colspan="3">
+            <select name="locationID" onchange="checkLocation(this)" aria-label="select location">
+              <option value="">(OTHER - Specify...)</option>
+              <option value="551">IMC - Internal Medicine Clinic</option>
+              <option value="552">CICU</option>
+            </select>
+            <input type="text" name="location_other" disabled value="other" />
+          </td>
+        </tr>
+        <tr>
+          <td class="v-top" colspan="2">Supervisor:</td>
+          <td colspan="3">
+            <input type="hidden" name="supervisor_method" id="supervisor_method" value="list" />
+            <input type="hidden" name="supervisor_search_userID" id="supervisor_search_userID" value="0" />
+            <input type="hidden" name="supervisor_other_save" id="supervisor_other_save" value="" />
+            <div class="mhSubTabs">
+              <ul>
+                <li><a href="javascript:void(0);" onclick="procedures_supervisor_tab('list',86,0,0);" id="supervisor_tab_1" class="active">List</a></li>
+                <li><a href="javascript:void(0);" onclick="procedures_supervisor_tab('search',86,0,0);" id="supervisor_tab_2">Search</a></li>
+                <li><a href="javascript:void(0);" onclick="procedures_supervisor_tab('other',86,0,0);" id="supervisor_tab_3">Other</a></li>
+              </ul>
+            </div>
+            <div id="procedures_supervisor_pane" class="well">
+              <select name="supervisorID" aria-label="select supervisor">
+                <option value="0">(none)</option>
+                <option value="" disabled>- - - - - - - - - - - -</option>
+                <option value="107517">Aagaard, Philip</option>
+                <option value="93037">Abbas, Samer</option>
+                <option value="92447">Abramowitz, Bruce</option>
+                <option value="93607">Ackmann, Cecilia</option>
+                <option value="99001">Smith, John</option>
+                <option value="99002">Lee, Karen</option>
+              </select>
+            </div>
+          </td>
+        </tr>
+      </table>
+
+      <h2 class="mhSectionHeader">Patient Information</h2>
+      <table class="fullscreen">
+        <tr>
+          <td colspan="2"><font>Encounter: </font></td>
+          <td colspan="3">
+            <select name="patientID" aria-label="select patient">
+              <option value="0">(new patient)</option>
+              <option value="0">- - - - - - - - - - - -</option>
+              <option value="10132993">10132993</option>
+              <option value="10135782">10135782</option>
+            </select>
+            <input type="text" name="patientID_other" id="patientID_other" />
+            <small class="text-muted">Note: do not use patient name.</small>
+          </td>
+        </tr>
+        <tr>
+          <td colspan="2">Patient Gender:</td>
+          <td colspan="3">
+            <select name="patient_gender" aria-label="select patient gender">
+              <option value="">(unavailable)</option>
+              <option value="F">Female</option>
+              <option value="M">Male</option>
+            </select>
+            <select name="patient_age" aria-label="select patient age">
+              <option value="">(unavailable)</option>
+              <option value="40">40 yrs</option>
+              <option value="55">55 yrs</option>
+            </select>
+          </td>
+        </tr>
+      </table>
+
+      <h2 class="mhSectionHeader">Procedures</h2>
+      <table id="selected_procedures" class="datatable fullscreen">
+        <tr><th>CPT&reg;:</th><th colspan="2">Procedure:</th><th>Role:</th><th>Actions:</th></tr>
+        <tr id="prow_0"><td colspan="5"><font color="#545454">(no procedures -- at least one is required)</font></td></tr>
+        <tr id="prow_1" class="hidden">
+          <td id="prow_1_code"></td>
+          <input type="hidden" name="prow_1_quantity" value="1" />
+          <td colspan="2" id="prow_1_title"></td>
+          <td><select name="prow_1_role" id="prow_1_role" aria-label="select role"><option value="1">Performed</option><option value="2">Assisted</option><option value="3">Observed</option></select></td>
+          <td><a href="javascript:procedures_delete(1);" aria-label="Delete" class="button"><i class="fa fa-times"></i> Delete</a></td>
+        </tr>
+        <tr id="prow_2" class="hidden">
+          <td id="prow_2_code"></td>
+          <input type="hidden" name="prow_2_quantity" value="1" />
+          <td colspan="2" id="prow_2_title"></td>
+          <td><select name="prow_2_role" id="prow_2_role" aria-label="select role"><option value="1">Performed</option><option value="2">Assisted</option><option value="3">Observed</option></select></td>
+          <td><a href="javascript:procedures_delete(2);" aria-label="Delete" class="button"><i class="fa fa-times"></i> Delete</a></td>
+        </tr>
+        <tr id="prow_3" class="hidden">
+          <td id="prow_3_code"></td>
+          <input type="hidden" name="prow_3_quantity" value="1" />
+          <td colspan="2" id="prow_3_title"></td>
+          <td><select name="prow_3_role" id="prow_3_role" aria-label="select role"><option value="1">Performed</option><option value="2">Assisted</option><option value="3">Observed</option></select></td>
+          <td><a href="javascript:procedures_delete(3);" aria-label="Delete" class="button"><i class="fa fa-times"></i> Delete</a></td>
+        </tr>
+        <tr id="prow_4" class="hidden">
+          <td id="prow_4_code"></td>
+          <input type="hidden" name="prow_4_quantity" value="1" />
+          <td colspan="2" id="prow_4_title"></td>
+          <td><select name="prow_4_role" id="prow_4_role" aria-label="select role"><option value="1">Performed</option><option value="2">Assisted</option><option value="3">Observed</option></select></td>
+          <td><a href="javascript:procedures_delete(4);" aria-label="Delete" class="button"><i class="fa fa-times"></i> Delete</a></td>
+        </tr>
+        <tr id="prow_5" class="hidden">
+          <td id="prow_5_code"></td>
+          <input type="hidden" name="prow_5_quantity" value="1" />
+          <td colspan="2" id="prow_5_title"></td>
+          <td><select name="prow_5_role" id="prow_5_role" aria-label="select role"><option value="1">Performed</option><option value="2">Assisted</option><option value="3">Observed</option></select></td>
+          <td><a href="javascript:procedures_delete(5);" aria-label="Delete" class="button"><i class="fa fa-times"></i> Delete</a></td>
+        </tr>
+      </table>
+
+      <div id="AddStandardProcedure">
+        <div id="AddStandardProcedureTitle">Add Standard Procedure</div>
+        <input type="text" name="procedures_searchterms" placeholder="Search" id="procedures_searchterms" onkeyup="procedures_search();" />
+        <div id="procedures_list">
+          <table class="sortable datatable">
+            <thead>
+              <tr><th class="header5 nosort">Add:&nbsp;&nbsp;</th><th class="header5">CPT&reg;:&nbsp;&nbsp;</th><th class="header5">Procedure:</th></tr>
+            </thead>
+            <tbody>
+              <tr class="">
+                <td class="center"><a href="javascript:void(0);" aria-label="Anchor Link" onclick="procedures_add(249,'- -','Ablation','0','0', false, '[]');"><i class="fa fa-plus"></i></a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(249,'- -','Ablation','0','0', false, '[]');">- -</a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(249,'- -','Ablation','0','0', false, '[]');">Ablation</a></td>
+              </tr>
+              <tr class="">
+                <td class="center"><a href="javascript:void(0);" aria-label="Anchor Link" onclick="procedures_add(307,'- -','Cardiac catheterization','0','0', false, '[]');"><i class="fa fa-plus"></i></a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(307,'- -','Cardiac catheterization','0','0', false, '[]');">- -</a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(307,'- -','Cardiac catheterization','0','0', false, '[]');">Cardiac catheterization</a></td>
+              </tr>
+              <tr class="verify_supervisor">
+                <td class="center"><a href="javascript:void(0);" aria-label="Anchor Link" onclick="procedures_add(378,'- -','Cardioversion','0','0', false, '[]');"><i class="fa fa-plus"></i></a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(378,'- -','Cardioversion','0','0', false, '[]');">- -</a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(378,'- -','Cardioversion','0','0', false, '[]');">Cardioversion</a></td>
+              </tr>
+              <tr class="">
+                <td class="center"><a href="javascript:void(0);" aria-label="Anchor Link" onclick="procedures_add(307,'- -','Colonoscopy','0','0', false, '[]');"><i class="fa fa-plus"></i></a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(307,'- -','Colonoscopy','0','0', false, '[]');">- -</a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(307,'- -','Colonoscopy','0','0', false, '[]');">Colonoscopy</a></td>
+              </tr>
+              <tr class="">
+                <td class="center"><a href="javascript:void(0);" aria-label="Anchor Link" onclick="procedures_add(411,'- -','Biopsy','0','0', false, '[]');"><i class="fa fa-plus"></i></a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(411,'- -','Biopsy','0','0', false, '[]');">- -</a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(411,'- -','Biopsy','0','0', false, '[]');">Biopsy</a></td>
+              </tr>
+              <tr class="verify_supervisor">
+                <td class="center"><a href="javascript:void(0);" aria-label="Anchor Link" onclick="procedures_add(412,'- -','Biopsy w/ scalpel','0','0', false, '[]');"><i class="fa fa-plus"></i></a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(412,'- -','Biopsy w/ scalpel','0','0', false, '[]');">- -</a></td>
+                <td><a href="javascript:void(0);" onclick="procedures_add(412,'- -','Biopsy w/ scalpel','0','0', false, '[]');">Biopsy w/ scalpel</a></td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <input type="submit" value="Log Procedure" />
+    </form>
+
+    <script>
+      (function () {
+        // Minimal jQuery-UI-style datepicker: focusing the date input opens a
+        // calendar overlay; Escape or blur closes it (mirrors the live widget).
+        var dateInput = document.querySelector('input[name="procedure_date"]');
+        var cal = document.createElement('div');
+        cal.id = 'ui-datepicker-div';
+        cal.style.display = 'none';
+        cal.innerHTML = '<a href="#" class="ui-state-default">17</a>';
+        document.body.appendChild(cal);
+        function openCal() { cal.style.display = 'block'; }
+        function closeCal() { cal.style.display = 'none'; }
+        dateInput.addEventListener('focus', openCal);
+        dateInput.addEventListener('keydown', function (e) {
+          if (e.key === 'Escape' || e.keyCode === 27) closeCal();
+        });
+        dateInput.addEventListener('blur', closeCal);
+
+        function checkLocation(menu) {
+          var other = document.querySelector('[name="location_other"]');
+          if (menu.options[menu.selectedIndex].value === '') {
+            other.disabled = false;
+            other.value = '';
+          } else {
+            other.disabled = true;
+            other.value = 'other';
+          }
+        }
+        window.checkLocation = checkLocation;
+
+        // Supervisor list <select> writes the chosen userID into the hidden field,
+        // mirroring procedures_supervisor_search_select on the live page.
+        var supSelect = document.querySelector('[name="supervisorID"]');
+        supSelect.addEventListener('change', function () {
+          document.getElementById('supervisor_search_userID').value = this.value || '0';
+          document.getElementById('supervisor_method').value = 'list';
+        });
+
+        // Tab switcher: live page swaps the pane contents. We model List vs Search:
+        // Search reveals a text input + results list inside the same pane.
+        window.procedures_supervisor_tab = function (which) {
+          var pane = document.getElementById('procedures_supervisor_pane');
+          document.getElementById('supervisor_method').value = which;
+          if (which === 'search') {
+            pane.innerHTML =
+              '<input type="text" name="supervisor_search" id="supervisor_search" aria-label="supervisor search" autocomplete="off" />' +
+              '<div id="ajax_listOfOptions" style="display:none"></div>';
+            var input = document.getElementById('supervisor_search');
+            var box = document.getElementById('ajax_listOfOptions');
+            var SUPS = ['Smith, John', 'Smithson, Karen', 'Lee, Karen', 'Diaz Sierra, Alejandra'];
+            input.addEventListener('input', function () {
+              box.innerHTML = '';
+              var qk = String(input.value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+              if (!qk) { box.style.display = 'none'; return; }
+              var hits = SUPS.filter(function (n) {
+                return n.toLowerCase().replace(/[^a-z0-9]+/g, '').indexOf(qk) !== -1;
+              });
+              if (!hits.length) { box.style.display = 'none'; return; }
+              hits.forEach(function (n) {
+                var div = document.createElement('div');
+                div.className = 'optionDiv';
+                div.textContent = n;
+                div.addEventListener('click', function () {
+                  input.value = n;
+                  document.getElementById('supervisor_search_userID').value = '99999';
+                  box.style.display = 'none';
+                });
+                box.appendChild(div);
+              });
+              box.style.display = 'block';
+            });
+          }
+        };
+
+        function firstFreeProwRow() {
+          for (var i = 1; i <= 5; i++) {
+            var tr = document.getElementById('prow_' + i);
+            if (tr && tr.className.indexOf('hidden') !== -1) return { tr: tr, n: i };
+          }
+          return null;
+        }
+
+        window.procedures_add = function (id, cpt, name) {
+          var slot = firstFreeProwRow();
+          if (!slot) return;
+          slot.tr.className = slot.tr.className.replace('hidden', '').trim();
+          document.getElementById('prow_' + slot.n + '_code').textContent = cpt;
+          document.getElementById('prow_' + slot.n + '_title').textContent = name;
+          var noRow = document.getElementById('prow_0');
+          if (noRow) noRow.style.display = 'none';
+          // Live page resets the filter after adding.
+          var search = document.getElementById('procedures_searchterms');
+          if (search) {
+            search.value = '';
+            filterProcedures('');
+          }
+        };
+
+        window.procedures_delete = function (n) {
+          var tr = document.getElementById('prow_' + n);
+          if (!tr) return;
+          if (tr.className.indexOf('hidden') === -1) tr.className = (tr.className + ' hidden').trim();
+          document.getElementById('prow_' + n + '_code').textContent = '';
+          document.getElementById('prow_' + n + '_title').textContent = '';
+          var anyVisible = false;
+          for (var i = 1; i <= 5; i++) {
+            var row = document.getElementById('prow_' + i);
+            if (row && row.className.indexOf('hidden') === -1) anyVisible = true;
+          }
+          if (!anyVisible) {
+            var noRow = document.getElementById('prow_0');
+            if (noRow) noRow.style.display = '';
+          }
+        };
+
+        function filterProcedures(value) {
+          var qk = String(value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+          var rows = document.querySelectorAll('#procedures_list tbody tr');
+          rows.forEach(function (r) {
+            var name = (r.children[2] ? r.children[2].textContent : '').toLowerCase().replace(/[^a-z0-9]+/g, '');
+            r.style.display = !qk || name.indexOf(qk) !== -1 ? '' : 'none';
+          });
+        }
+        window.procedures_search = function () {
+          filterProcedures(document.getElementById('procedures_searchterms').value);
+        };
+
+        document.getElementById('procedureform').addEventListener('submit', function (e) {
+          e.preventDefault();
+          document.body.setAttribute('data-submitted', 'true');
+          var n = parseInt(document.body.getAttribute('data-submit-count') || '0', 10);
+          document.body.setAttribute('data-submit-count', String(n + 1));
+        });
+      })();
+    </script>
+  </body>
+</html>

@@ -285,27 +285,53 @@
     if (!el) return false;
     const hay = `${el.id || ''} ${el.name || ''} ${fieldText(el)}`.toLowerCase();
     if (/date|note|location|site|facility/.test(hay)) return false;
+    // Live MedHub: <input name="procedures_searchterms" onkeyup="procedures_search()">.
+    if (/procedures?[_\s]*search/.test(hay)) return true;
     if (/proc_search|procedure\s*search/.test(hay.replace(/\s+/g, ' '))) return true;
     return /\bproc\b/.test(hay) && /\bsearch\b/.test(hay);
   }
 
+  // The "+" add control. Idealized fixture uses <a class="add">; live MedHub
+  // uses <a onClick="procedures_add(249,'- -','Ablation', ...)"> with a fa-plus
+  // icon, where all three links in the row call procedures_add.
+  function procedureAddControl(el) {
+    if (!el || !el.closest) return null;
+    return el.closest(
+      'a.add, button.add, [onclick*="procedures_add"], a[href*="procedures_add"]'
+    );
+  }
+
+  function procedureRow(add) {
+    if (!add || !add.closest) return null;
+    return add.closest('.proc_row, li[data-name], #procedures_list tr, tr, li');
+  }
+
   function isProcedureAddClick(el) {
-    const add = el.closest && el.closest('a.add, button.add');
+    const add = procedureAddControl(el);
     if (!add) return false;
-    const row = add.closest('.proc_row, [data-name]');
-    return !!row;
+    // Idealized fixture pairs the add link with a .proc_row/[data-name] row;
+    // live MedHub nests it inside the #procedures_list table rows.
+    return !!(add.closest('.proc_row, [data-name]') || add.closest('#procedures_list'));
   }
 
   function emitProcedureAddStep(el) {
-    const add = el.closest('a.add, button.add') || el;
-    const row = add.closest('.proc_row, li[data-name], li');
+    const add = procedureAddControl(el) || el;
+    const row = procedureRow(add);
     const container = row || add;
-    const { optionSelector, candidates, container: optContainer } = optionContainerSelector(container);
+    const inProcList = !!(container.closest && container.closest('#procedures_list'));
+    let { optionSelector, candidates, container: optContainer } = optionContainerSelector(container);
+    // Live MedHub procedure rows have empty or inconsistent classes
+    // (class='' or class='verify_supervisor'), so a class/tag selector is
+    // unreliable and a bare <tr> would match every row on the page. Scope to
+    // the picker's own table whenever the row lives inside #procedures_list.
+    if (inProcList) {
+      optionSelector = '#procedures_list tbody tr';
+    }
     const procPending = pendingType && isProcedureSearchField(pendingType.el) ? pendingType : null;
     const procInput =
       procPending?.el ||
       document.querySelector(
-        '#procSearch, #proc_search, [aria-label*="Procedure" i], [name*="procedure" i][type="text"]'
+        '#procSearch, #proc_search, #procedures_searchterms, [name="procedures_searchterms"], [aria-label*="Procedure" i], [name*="procedure" i][type="text"]'
       );
     const inputCandidates = procPending
       ? procPending.candidates
@@ -381,8 +407,16 @@
     }
   }
 
+  // Clicks inside a date-picker calendar overlay (jQuery UI / flatpickr / bootstrap)
+  // should not be recorded: the chosen date is captured from the input's own
+  // value via the live input/blur path, and a calendar-cell selector is brittle.
+  function isInsideDatePicker(el) {
+    return !!(el && el.closest && el.closest('#ui-datepicker-div, .ui-datepicker, .flatpickr-calendar, .datepicker-dropdown'));
+  }
+
   function handleClick(e) {
     if (!active) return;
+    if (isInsideDatePicker(e.target)) return;
     const el = e.target.closest('a,button,[role="button"],[role="option"],li,div,span,input,select,td') || e.target;
 
     // MedHub procedure "+" add — always an autocomplete pick, even without typing first.
