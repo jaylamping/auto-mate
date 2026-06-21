@@ -6,7 +6,7 @@
  * messages (relayed through the background worker) via chrome.runtime.onMessage.
  */
 (function () {
-  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isLocationDropdownCandidates, isEncounterCandidates, isGenderCandidates, isAgeCandidates, isDiagnosisCandidates, isComplicationsCandidates, isNotesCandidates, isProcedureFieldCandidates, isKnownLocationValue } = window.FAA_MSG;
+  const { MSG, ROLE, FIELD, FORM_FIELDS, STORAGE_KEYS, BUILD_ID, ROW_TIMEOUT_MS, tabMatchesRecipeUrl, toMedHubDateString, minMappingLenForFieldKey, minMappingLenFromHaystack, minColumnInferLenForFieldKey, normalizeMatchKey, valueMatchesCell, MIN_VALUE_MATCH_SUBSTRING_LEN, pickPreferredColumnMatch, autoGuessField, guessFieldFromLabel, headerAllowedForFieldKey, isDateCandidates, isLocationCandidates, isLocationDropdownCandidates, isEncounterCandidates, isGenderCandidates, isAgeCandidates, isDiagnosisCandidates, isComplicationsCandidates, isNotesCandidates, isProcedureFieldCandidates, isKnownLocationValue } = window.FAA_MSG;
   const PARSER = window.FAA_PARSER;
   const REPORT = window.FAA_REPORT;
 
@@ -237,8 +237,52 @@
 
   function isFieldMappingSatisfied(mapKey) {
     if (state.mapping[mapKey]) return true;
-    if (isColumnOptionalField(mapKey) && staticValueForField(mapKey)) return true;
+    if (isColumnOptionalField(mapKey)) {
+      if (staticValueForField(mapKey)) return true;
+      if (mapKey === FIELD.LOCATION && defaultStaticLocation()) return true;
+    }
     return false;
+  }
+
+  function missingRequiredMappingKeys() {
+    return REQUIRED_FIELD_KEYS.filter((f) => !isFieldMappingSatisfied(f));
+  }
+
+  function syncMappingBeforeContinue() {
+    inferMappingFromLearn();
+    autoApplyGuessedColumnsFromHeaders();
+  }
+
+  /** When Learn captured a field but value infer failed, trust obvious spreadsheet headers. */
+  function autoApplyGuessedColumnsFromHeaders() {
+    if (!state.parsed) return false;
+    const guessed = PARSER.guessMapping(state.parsed.headers);
+    let changed = false;
+    for (const key of REQUIRED_FIELD_KEYS) {
+      if (state.mapping[key]) continue;
+      if (key === FIELD.LOCATION && (staticValueForField(key) || defaultStaticLocation())) continue;
+      const documented =
+        key === FIELD.PROCEDURE ? isProcedureRegistered() : Boolean(state.formBindings[key]);
+      if (!documented) continue;
+      const col = guessed[key];
+      if (!col) continue;
+      state.mapping[key] = col;
+      changed = true;
+    }
+    if (changed) {
+      rebuildEngineRows();
+      schedulePersistDataSession();
+    }
+    return changed;
+  }
+
+  function rowMatchesTypedValue(cellValue, typed, mapKey) {
+    if (mapKey === FIELD.DATE) {
+      const cellMedHub = toMedHubDateString(PARSER.excelDateToISO(cellValue));
+      const typedMedHub = toMedHubDateString(typed);
+      if (cellMedHub && typedMedHub && cellMedHub === typedMedHub) return true;
+    }
+    return valueMatchesCell(cellValue, typed);
   }
 
   /** Next when user documented once (selectors) and required columns are mapped. */
@@ -264,11 +308,26 @@
   }
 
   function refreshLearnStepNav() {
+    syncMappingBeforeContinue();
     const next = $('#btnLearnNext');
     if (!next) return;
     const ready = isMappingComplete();
     next.disabled = !ready;
     next.classList.toggle('btn-primary-ready', ready);
+
+    const hint = $('#learnStepHint');
+    if (hint) {
+      if (!state.parsed || ready) {
+        hint.textContent = '';
+      } else {
+        const parts = [];
+        if (!hasDocumentedWorkflow()) parts.push('pick a procedure on MedHub (+ on list row)');
+        for (const key of missingRequiredMappingKeys()) {
+          parts.push(`${FIELD_LABEL_BY_KEY[key]} spreadsheet column`);
+        }
+        hint.textContent = parts.length ? `Still needed: ${parts.join('; ')}` : '';
+      }
+    }
   }
 
   function refreshLearnReadiness() {
@@ -511,6 +570,17 @@
   // ---- Messages from content ----
   chrome.runtime.onMessage.addListener((message) => {
     if (!message || !message.type) return;
+    const contentTypes = new Set([
+      MSG.STEP_RECORDED,
+      MSG.FIELD_INPUT,
+      MSG.DIAG_EVENT,
+      MSG.ACTION_LOG,
+      MSG.ROW_DONE,
+      MSG.ENGINE_ERROR
+    ]);
+    // Content-script messages arrive directly and via the background relay.
+    // Use the relay copy only so Learn/session logs do not duplicate events.
+    if (contentTypes.has(message.type) && !message._fromTabId) return;
     switch (message.type) {
       case MSG.STEP_RECORDED:
         onStepRecorded(message.payload);
@@ -729,11 +799,18 @@
   }
 
   function mapFieldColHtml(key, label) {
-    if (key === FIELD.PROCEDURE) {
+    if (key === FIELD.PROCEDURE && isProcedureRegistered() && state.mapping[FIELD.PROCEDURE]) {
       return (
         `<div class="map-field-col-wrap map-field-col-mapped">` +
-        `<span class="map-field-check" title="Procedure input registered" aria-label="Procedure input registered">` +
+        `<span class="map-field-check" title="Procedure mapped" aria-label="Procedure mapped">` +
         `<span class="map-field-check-icon" aria-hidden="true">✓</span></span></div>`
+      );
+    }
+    if (key === FIELD.PROCEDURE) {
+      return (
+        `<div class="map-field-col-wrap">` +
+        `<select class="select" data-col-map="${key}" aria-label="Spreadsheet column for ${label}">` +
+        `</select></div>`
       );
     }
     if (isColumnOptionalField(key) && staticValueForField(key) && !state.mapping[key]) {
@@ -751,6 +828,7 @@
   }
 
   function renderFormMapping() {
+    syncMappingBeforeContinue();
     const loading = $('#mappingFieldLoading');
     const list = $('#mappingFieldsList');
     if (!list || !state.parsed) return;
@@ -799,7 +877,7 @@
     const matches = state.parsed.headers.filter(
       (h) =>
         headerAllowedForFieldKey(h, mapKey) &&
-        rows.some((row) => valueMatchesCell(row[h], typed))
+        rows.some((row) => rowMatchesTypedValue(row[h], typed, mapKey))
     );
     if (!matches.length) return null;
 
@@ -857,20 +935,46 @@
     };
   }
 
+  function recipeStepKey(step) {
+    if (step.field === FIELD.PROCEDURE) return FIELD.PROCEDURE;
+    if (step.field === FIELD.SUBMIT) return FIELD.SUBMIT;
+    if (step.field === FIELD.LOCATION) return FIELD.LOCATION;
+    const firstCandidate = (step.candidates || [])[0];
+    return `${step.field}:${step.role}:${firstCandidate ? firstCandidate.type + '=' + firstCandidate.value : ''}`;
+  }
+
+  function dedupeRecipeSteps(steps) {
+    const byKey = new Map();
+    for (const step of steps) {
+      const key = recipeStepKey(step);
+      const prev = byKey.get(key);
+      if (!prev) {
+        byKey.set(key, step);
+        continue;
+      }
+      const prevSpecificity =
+        (prev.optionSelector ? 2 : 0) + (prev.clickRel ? 2 : 0) + ((prev.candidates || []).length ? 1 : 0);
+      const nextSpecificity =
+        (step.optionSelector ? 2 : 0) + (step.clickRel ? 2 : 0) + ((step.candidates || []).length ? 1 : 0);
+      if (nextSpecificity >= prevSpecificity) byKey.set(key, step);
+    }
+    return Array.from(byKey.values());
+  }
+
   async function saveRecipeFromSteps() {
     const recorded = state.recordedSteps.filter((s) => s._field);
     if (!recorded.length) {
       toast('Document one procedure on the form first — that teaches us where each field lives.');
       return;
     }
-    const steps = recorded
+    const steps = dedupeRecipeSteps(recorded
       .filter((s) => !isSupervisorSearchTabLearnStep(s))
       .filter((s) => {
         if (s.role !== ROLE.INPUT || !s.text) return true;
         const fromLabel = guessFieldFromLabel(s.text, s.role);
         return !fromLabel || fromLabel === FIELD.CLICK || fromLabel === s._field;
       })
-      .map(stepToRecipeStep);
+      .map(stepToRecipeStep));
     const tab = await getActiveTab();
     const recipe = {
       version: 1,

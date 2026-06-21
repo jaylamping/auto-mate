@@ -123,6 +123,16 @@ assert.strictEqual(toMedHubDateString('2026-01-05'), '01/05/2026', 'ISO date -> 
 assert.strictEqual(toMedHubDateString('06/17/2026'), '06/17/2026', 'already MedHub format stays');
 assert.strictEqual(toMedHubDateString('6/7/2026'), '06/07/2026', 'single-digit month/day padded');
 
+// Date column infer: Excel ISO in sheet vs MM/DD/YYYY typed on MedHub form
+const dateRows = [{ 'Date of Service': '2026-01-05' }];
+assert.ok(
+  dateRows.some((row) => {
+    const cellMedHub = toMedHubDateString(root.FAA_PARSER.excelDateToISO(row['Date of Service']));
+    return cellMedHub === toMedHubDateString('01/05/2026');
+  }),
+  'ISO spreadsheet date should match MedHub-typed date for infer'
+);
+
 const { tabMatchesRecipeUrl } = root.FAA_MSG;
 assert.strictEqual(
   tabMatchesRecipeUrl(
