@@ -266,11 +266,43 @@
   }
 
   function syncMappingBeforeContinue() {
-    inferMappingFromLearn();
-    autoApplyGuessedColumnsFromHeaders();
+    if (state._syncingMapping) return;
+    state._syncingMapping = true;
+    try {
+      inferMappingFromLearn();
+      autoApplyGuessedColumnsFromHeaders();
+    } finally {
+      state._syncingMapping = false;
+    }
+    updateLearnStepNavUI();
   }
 
-  /** When Learn captured a field but value infer failed, trust obvious spreadsheet headers. */
+  function updateLearnStepNavUI() {
+    const next = $('#btnLearnNext');
+    if (!next) return;
+    const ready = isMappingComplete();
+    next.disabled = !ready;
+    next.classList.toggle('btn-primary-ready', ready);
+
+    const hint = $('#learnStepHint');
+    if (hint) {
+      if (!state.parsed || ready) {
+        hint.textContent = '';
+      } else {
+        const parts = [];
+        if (!hasDocumentedWorkflow()) parts.push('pick a procedure on MedHub (+ on list row)');
+        for (const key of missingRequiredMappingKeys()) {
+          parts.push(`${FIELD_LABEL_BY_KEY[key]} spreadsheet column`);
+        }
+        hint.textContent = parts.length ? `Still needed: ${parts.join('; ')}` : '';
+      }
+    }
+  }
+
+  function refreshLearnStepNav() {
+    if (!state._syncingMapping) syncMappingBeforeContinue();
+    else updateLearnStepNavUI();
+  }
   function autoApplyGuessedColumnsFromHeaders() {
     if (!state.parsed) return false;
     const guessed = PARSER.guessMapping(state.parsed.headers);
@@ -325,29 +357,6 @@
       if (v == null || String(v).trim() === '') missing.push(FIELD_LABEL_BY_KEY[f]);
     }
     return missing;
-  }
-
-  function refreshLearnStepNav() {
-    syncMappingBeforeContinue();
-    const next = $('#btnLearnNext');
-    if (!next) return;
-    const ready = isMappingComplete();
-    next.disabled = !ready;
-    next.classList.toggle('btn-primary-ready', ready);
-
-    const hint = $('#learnStepHint');
-    if (hint) {
-      if (!state.parsed || ready) {
-        hint.textContent = '';
-      } else {
-        const parts = [];
-        if (!hasDocumentedWorkflow()) parts.push('pick a procedure on MedHub (+ on list row)');
-        for (const key of missingRequiredMappingKeys()) {
-          parts.push(`${FIELD_LABEL_BY_KEY[key]} spreadsheet column`);
-        }
-        hint.textContent = parts.length ? `Still needed: ${parts.join('; ')}` : '';
-      }
-    }
   }
 
   function refreshLearnReadiness() {
@@ -635,8 +644,10 @@
     if (step.role === ROLE.AUTOCOMPLETE) {
       const picked = String(step.sampleOptionText ?? '').trim();
       const typed = String(step.sampleValue ?? '').trim();
-      if (picked && picked.length >= typed.length) return picked;
-      return typed || picked;
+      const pickLines = picked.split(/\r?\n/).map((s) => s.trim()).filter(Boolean);
+      const cleanedPick = pickLines.length ? pickLines[pickLines.length - 1] : picked;
+      if (cleanedPick && cleanedPick.length >= typed.length) return cleanedPick;
+      return typed || cleanedPick || picked;
     }
     return String(step.sampleValue ?? step.sampleOptionText ?? '').trim();
   }
@@ -782,13 +793,13 @@
     state.mapping[mapKey] = col;
     sendDebugEvent('mapping:set', { field: mapKey, column: col, source: flash ? 'ui-or-infer' : 'infer' });
     if (mapKey !== FIELD.PROCEDURE) discoverField(mapKey);
-    renderFormMapping();
     if (changed) {
+      renderFormMapping();
       if (flash) flashColField(mapKey);
       rebuildEngineRows();
       schedulePersistDataSession();
     }
-    refreshLearnStepNav();
+    if (!state._syncingMapping) refreshLearnStepNav();
   }
 
   function inferAndSetColumnForField(mapKey, step) {
@@ -866,7 +877,6 @@
   }
 
   function renderFormMapping() {
-    syncMappingBeforeContinue();
     const loading = $('#mappingFieldLoading');
     const list = $('#mappingFieldsList');
     if (!list || !state.parsed) return;
@@ -999,6 +1009,58 @@
     return Array.from(byKey.values());
   }
 
+  const CANONICAL_RECIPE_STEPS = {
+    [FIELD.DATE]: {
+      field: FIELD.DATE,
+      role: ROLE.INPUT,
+      candidates: [{ type: 'css', value: 'input[name="procedure_date"]' }]
+    },
+    [FIELD.ENCOUNTER]: {
+      field: FIELD.ENCOUNTER,
+      role: ROLE.INPUT,
+      candidates: [{ type: 'css', value: 'input[name="patientID_other"]' }]
+    }
+  };
+
+  /** Add mapped required fields missing from a saved recipe (e.g. prefilled date never recorded). */
+  function ensureRecipeSteps(recipe) {
+    if (!recipe || !Array.isArray(recipe.steps)) return recipe;
+    const steps = [...recipe.steps];
+    const fieldsPresent = new Set(steps.map((s) => s.field));
+    const toAdd = [];
+
+    for (const key of REQUIRED_FIELD_KEYS) {
+      if (!state.mapping[key]) continue;
+      if (fieldsPresent.has(key)) continue;
+      if (key === FIELD.PROCEDURE && !isProcedureRegistered()) continue;
+
+      const binding = state.formBindings[key];
+      if (binding) {
+        toAdd.push(stepToRecipeStep(binding));
+        continue;
+      }
+      const canonical = CANONICAL_RECIPE_STEPS[key];
+      if (canonical) toAdd.push({ ...canonical });
+    }
+
+    let merged = steps;
+    if (toAdd.length) {
+      const dateSteps = toAdd.filter((s) => s.field === FIELD.DATE);
+      const otherSteps = toAdd.filter((s) => s.field !== FIELD.DATE);
+      merged = dedupeRecipeSteps([...dateSteps, ...otherSteps, ...steps]);
+    }
+    for (const step of merged) {
+      if (step.field === FIELD.PROCEDURE && step.role === ROLE.AUTOCOMPLETE) {
+        step.optionSelector = '#procedures_list tbody tr';
+        if (!step.clickRel) step.clickRel = 'a';
+      }
+    }
+    return {
+      ...recipe,
+      steps: merged
+    };
+  }
+
   async function saveRecipeFromSteps() {
     const recorded = state.recordedSteps.filter((s) => s._field);
     if (!recorded.length) {
@@ -1014,13 +1076,13 @@
       })
       .map(stepToRecipeStep));
     const tab = await getActiveTab();
-    const recipe = {
+    const recipe = ensureRecipeSteps({
       version: 1,
       url: tab ? tab.url : '',
       createdAt: new Date().toISOString(),
       procedureRepeatable: true,
       steps
-    };
+    });
     await chrome.storage.local.set({ [STORAGE_KEYS.RECIPE]: recipe });
     state.recipe = recipe;
     renderRecipeStatus();
@@ -1367,7 +1429,14 @@
         finish({ index, result: { ok: false, actions: [], failedField: 'timeout' } });
       }, ROW_TIMEOUT_MS);
 
-      sendToTab(MSG.RUN_ROW, { recipe: state.recipe, row, index, total, dryRun, fieldDelayMs }).catch(() => {
+      sendToTab(MSG.RUN_ROW, {
+        recipe: ensureRecipeSteps(state.recipe),
+        row,
+        index,
+        total,
+        dryRun,
+        fieldDelayMs
+      }).catch(() => {
         finish({ index, result: { ok: false, actions: [], failedField: 'page' } });
       });
     });

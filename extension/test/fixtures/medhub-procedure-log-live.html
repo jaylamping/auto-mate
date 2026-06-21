@@ -368,14 +368,21 @@
               '<div id="ajax_listOfOptions" style="display:none"></div>';
             var input = document.getElementById('searchterms');
             var box = document.getElementById('ajax_listOfOptions');
-            var SUPS = ['Smith, John', 'Smithson, Karen', 'Lee, Karen', 'Diaz Sierra, Alejandra', 'Driver, Steven (AIMMC-Cardio-IM)', 'Beall, Allan (AIMMC-Cardio-IM)', 'Dibs, Samer (AIMMC - CCE IM)', "D'Silva, Oliver (AIMMC-Cardio-IM)", 'Ezidinma, Afoma'];
+            var SUPS = ['Smith, John', 'Smithson, Karen', 'Lee, Karen', 'Diaz Sierra, Alejandra', 'Driver, Steven (AIMMC-Cardio-IM)', 'Beall, Allan (AIMMC-Cardio-IM)', 'Dibs, Samer (AIMMC - CCE IM)', "D'Silva, Oliver (AIMMC-Cardio-IM)", 'Ezidinma, Afoma', 'Gonzalez, Daniel (ALGH-CCM (IM))', 'Gonzalez, Joaquin (ACMC - Rot EM)', 'Gonzalez, Laura (AIMMC-Cardio-IM)', 'Gonzalez, Miguel (AIMMC-Cardio-IM)', 'Joachin, Gonzalez (ACMC - Rot EM)'];
             input.addEventListener('input', function () {
               box.innerHTML = '';
-              var qk = String(input.value).toLowerCase().replace(/[^a-z0-9]+/g, '');
+              var raw = String(input.value);
+              // Live MedHub: comma-form queries like "GONZALEZ, JOAQUIN" return no rows.
+              if (raw.indexOf(',') !== -1) { box.style.display = 'none'; return; }
+              var qk = raw.toLowerCase().replace(/[^a-z0-9]+/g, '');
               if (!qk) { box.style.display = 'none'; return; }
               var hits = SUPS.filter(function (n) {
                 return n.toLowerCase().replace(/[^a-z0-9]+/g, '').indexOf(qk) !== -1;
               });
+              // Live page: ALL CAPS last name often surfaces only the first row.
+              if (raw === 'GONZALEZ' && qk === 'gonzalez') {
+                hits = hits.filter(function (n) { return /daniel/i.test(n); });
+              }
               if (!hits.length) { box.style.display = 'none'; return; }
               hits.forEach(function (n) {
                 var div = document.createElement('div');

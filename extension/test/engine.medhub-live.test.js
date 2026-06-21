@@ -48,9 +48,14 @@ const row = {
 };
 
 function selectedTitles(document) {
-  return Array.from(document.querySelectorAll('#selected_procedures tr[id^="prow_"]:not(.hidden)'))
-    .filter((tr) => tr.id !== 'prow_0')
-    .map((tr) => document.getElementById(tr.id + '_title').textContent);
+  const out = [];
+  for (let i = 1; i <= 20; i++) {
+    const title = document.getElementById(`prow_${i}_title`);
+    const t = String(title && title.textContent || '').trim();
+    if (!t || /^[-\s.]+$/.test(t)) continue;
+    out.push(t);
+  }
+  return out;
 }
 
 module.exports = async function run() {
@@ -121,6 +126,114 @@ module.exports = async function run() {
     await ENGINE.runRow(recipe, row2, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
     assert.deepStrictEqual(selectedTitles(document), ['Ablation'], 'row2 replaces prior procedures');
     console.log('  engine.medhub-live: clears prior procedures via procedures_delete before next row.');
+  }
+
+  // ---- First dry-run row clears procedures already on the form (isolated-world safe) ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, window, ENGINE } = page;
+    window.procedures_add('1', '--', 'Ablation');
+    assert.deepStrictEqual(selectedTitles(document), ['Ablation'], 'pre-existing procedure on form');
+    const recipe = buildRecipe(page.MSG);
+    const result = await ENGINE.runRow(
+      recipe,
+      { ...row, procedures: ['Colonoscopy'] },
+      { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0, index: 0, total: 3 }
+    );
+    assert.ok(result.ok, JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.ok(
+      result.actions.some((a) => (a.detail || '').includes('Cleared')),
+      'first row logs procedure cleanup'
+    );
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy'], 'first row replaces pre-existing procedure');
+    console.log('  engine.medhub-live: first dry-run row clears pre-existing procedures.');
+  }
+
+  // ---- Exact MedHub delete control: aria-label=Delete href=javascript:procedures_delete(n) ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, window, ENGINE } = page;
+    window.procedures_add('1', '--', 'Ablation');
+    const deleteLink = document.querySelector('a[aria-label="Delete"][href="javascript:procedures_delete(1);"]');
+    assert.ok(deleteLink, 'exact MedHub delete link present');
+    const recipe = buildRecipe(page.MSG);
+    const result = await ENGINE.runRow(
+      recipe,
+      { ...row, procedures: ['Colonoscopy'] },
+      { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 }
+    );
+    assert.ok(result.ok);
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy'], 'delete link clears Ablation before fill');
+    console.log('  engine.medhub-live: deletes via aria-label Delete + procedures_delete href.');
+  }
+
+  // ---- Live MedHub may keep "hidden" class on filled prow rows — still clear ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, window, ENGINE } = page;
+    window.procedures_add('1', '--', 'Ablation');
+    const tr = document.getElementById('prow_1');
+    tr.className = (tr.className + ' hidden').trim();
+    tr.style.display = 'table-row';
+    assert.strictEqual(selectedTitles(document).length, 1, 'procedure visible despite hidden class');
+    const recipe = buildRecipe(page.MSG);
+    const result = await ENGINE.runRow(
+      recipe,
+      { ...row, procedures: ['Colonoscopy'] },
+      { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 }
+    );
+    assert.ok(result.ok);
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy'], 'clears row with hidden class + title');
+    console.log('  engine.medhub-live: clears procedure when prow row keeps hidden class.');
+  }
+
+  // ---- Empty prow_2..5 template rows (Delete links only) do not trigger cleanup ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE } = page;
+    const recipe = buildRecipe(page.MSG);
+    const result = await ENGINE.runRow(
+      recipe,
+      { ...row, procedures: ['Colonoscopy'] },
+      { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 }
+    );
+    assert.ok(result.ok);
+    assert.ok(
+      !result.actions.some((a) => (a.detail || '').includes('cleanup incomplete')),
+      'no failed cleanup on empty template slots'
+    );
+    assert.ok(
+      !result.actions.some((a) => a.field === 'procedure' && a.role === 'click' && a.outcome === 'failed'),
+      'no failed procedure click cleanup'
+    );
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy'], 'adds procedure without spurious delete loop');
+    console.log('  engine.medhub-live: empty template prow slots do not trigger cleanup.');
+  }
+
+  // ---- Live MedHub may hide deleted prow rows but leave stale title text ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, window, ENGINE } = page;
+    window.procedures_add('1', '--', 'Ablation');
+    window.procedures_delete = function (n) {
+      const tr = document.getElementById('prow_' + n);
+      if (!tr) return;
+      tr.className = (tr.className + ' hidden').trim();
+      tr.style.display = 'none';
+    };
+    const recipe = buildRecipe(page.MSG);
+    const result = await ENGINE.runRow(
+      recipe,
+      { ...row, procedures: ['Colonoscopy'] },
+      { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 }
+    );
+    assert.ok(result.ok);
+    assert.ok(
+      result.actions.some((a) => a.field === 'procedure' && a.role === 'click' && a.outcome === 'success'),
+      'cleanup succeeds when delete hides row but keeps title text'
+    );
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy'], 'replaces procedure after live-style delete');
+    console.log('  engine.medhub-live: stale title on hidden prow row does not block cleanup.');
   }
 
   // ---- Stale Ablation + Coronary from prior rows cleared before next dry-run row ----
@@ -312,7 +425,9 @@ module.exports = async function run() {
     const first = await ENGINE.runRow(searchRecipe, { ...row, supervisor: 'DRIVER, STEVEN L' }, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
     assert.ok(first.ok, 'first supervisor search ok');
     assert.ok(document.getElementById('supervisor_search_change'), 'selected state exposes CHANGE');
+    const t0 = Date.now();
     const second = await ENGINE.runRow(searchRecipe, { ...row, supervisor: 'DIBS, SAMER R' }, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(Date.now() - t0 < 1500, 'second row should click CHANGE quickly, not wait on List tab');
     assert.ok(second.ok, 'second supervisor search ok after CHANGE: ' + JSON.stringify(second.actions.filter((a) => a.outcome !== 'success')));
     assert.strictEqual(document.getElementById('supervisor_search_selected').textContent, 'Dibs, Samer (AIMMC - CCE IM)', 'second supervisor selected after CHANGE reset');
     console.log('  engine.medhub-live: supervisor Search clicks CHANGE between dry-run rows.');
@@ -339,6 +454,34 @@ module.exports = async function run() {
     assert.ok(result.ok, 'beall supervisor search ok: ' + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
     assert.strictEqual(document.getElementById('supervisor_search_selected').textContent, 'Beall, Allan (AIMMC-Cardio-IM)', 'beall supervisor picked from contextual result');
     console.log('  engine.medhub-live: supervisor Search matches extra last-name tokens.');
+  }
+
+  // ---- Multiple same-last-name hits: pick row that matches spreadsheet first name ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE, window } = page;
+    const { ROLE, FIELD } = page.MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    const searchRecipe = {
+      version: 1,
+      url: 'https://ahc.medhub.com/u/r/procedures_log.mh',
+      procedureRepeatable: true,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('input[name="procedure_date"]') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('input[name="location_other"]') },
+        { field: FIELD.SUPERVISOR, role: ROLE.AUTOCOMPLETE, optionSelector: 'div.optionDiv', candidates: css('input[name="searchterms"]') },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('input[name="patientID_other"]') }
+      ]
+    };
+    window.procedures_supervisor_tab('search');
+    const result = await ENGINE.runRow(searchRecipe, { ...row, supervisor: 'GONZALEZ, JOAQUIN B' }, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, 'gonzalez joaquin supervisor search ok: ' + JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.strictEqual(
+      document.getElementById('supervisor_search_selected').textContent,
+      'Gonzalez, Joaquin (ACMC - Rot EM)',
+      'gonzalez joaquin beats daniel when multiple Gonzalez rows appear'
+    );
+    console.log('  engine.medhub-live: supervisor Search disambiguates same last name via first name.');
   }
 
   // ---- log_another checkbox (live name="log_another") on multi-row submit ----
@@ -610,4 +753,49 @@ module.exports = async function run() {
     assert.deepStrictEqual(selectedTitles(document), [medhubProcedure], `${sheetProcedure} selected desired MedHub row`);
   }
   console.log('  engine.medhub-live: procedure aliases select desired MedHub rows.');
+
+  // ---- Broad tbody tr selector must not match Background Information decoys ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE, MSG } = page;
+    const bgTable = document.querySelector('table.fullscreen tbody');
+    const decoy = document.createElement('tr');
+    decoy.innerHTML = '<td colspan="5">Background Information</td>';
+    bgTable.appendChild(decoy);
+    const { ROLE, FIELD } = MSG;
+    const css = (v) => [{ type: 'css', value: v }];
+    const recipe = {
+      version: 1,
+      url: 'https://ahc.medhub.com/u/r/procedures.mh',
+      procedureRepeatable: true,
+      steps: [
+        { field: FIELD.DATE, role: ROLE.INPUT, candidates: css('input[name="procedure_date"]') },
+        { field: FIELD.LOCATION, role: ROLE.STATIC, staticValue: 'IMC', candidates: css('input[name="location_other"]') },
+        { field: FIELD.SUPERVISOR, role: ROLE.AUTOCOMPLETE, optionSelector: 'div.optionDiv', candidates: css('select[name="supervisorID"]') },
+        { field: FIELD.ENCOUNTER, role: ROLE.INPUT, candidates: css('input[name="patientID_other"]') },
+        {
+          field: FIELD.PROCEDURE,
+          role: ROLE.AUTOCOMPLETE,
+          optionSelector: 'tbody tr',
+          clickRel: 'a',
+          candidates: css('input[name="procedures_searchterms"]')
+        }
+      ]
+    };
+    const coronaryRow = {
+      date: '06/17/2026',
+      supervisor: 'Smith, John',
+      mrn: '000123456',
+      procedures: ['CORONARY ANGIOGRAM/POSSIBLE PTCA - CV'],
+      location: 'IMC'
+    };
+    const result = await ENGINE.runRow(recipe, coronaryRow, { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 });
+    assert.ok(result.ok, JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.deepStrictEqual(
+      selectedTitles(document),
+      ['Coronary Angiography/Diagnostic Cath'],
+      'scopes to #procedures_list despite broad tbody tr recipe'
+    );
+    console.log('  engine.medhub-live: procedure picker ignores Background Information decoy rows.');
+  }
 };

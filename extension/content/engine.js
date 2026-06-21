@@ -7,7 +7,7 @@
  */
 (function (root) {
   const DOM = root.FAA_DOM;
-  const { ROLE, FIELD, normalizeMatchKey, toMedHubDateString } = root.FAA_MSG;
+  const { MSG, ROLE, FIELD, normalizeMatchKey, toMedHubDateString } = root.FAA_MSG;
 
   let abortFlag = false;
 
@@ -245,6 +245,50 @@
     return (optionEl.textContent || '').trim();
   }
 
+  function isMedHubProcedureListRow(el) {
+    if (!el || el.tagName !== 'TR') return false;
+    if (!el.closest('#procedures_list')) return false;
+    return el.querySelector('a[onclick*="procedures_add"], a[href*="procedures_add"]');
+  }
+
+  function extractMedHubProcedureRowLabel(tr) {
+    if (!tr) return '';
+    for (const link of tr.querySelectorAll('a[onclick*="procedures_add"]')) {
+      const onclick = link.getAttribute('onclick') || '';
+      const m = onclick.match(/procedures_add\s*\([^,]*,\s*'[^']*',\s*'([^']*)'/);
+      if (m && m[1]) return m[1];
+    }
+    const cells = tr.querySelectorAll('td');
+    for (let i = cells.length - 1; i >= 0; i--) {
+      const t = (cells[i].textContent || '').trim();
+      if (!t || t === '-' || /^[-\s]+$/.test(t)) continue;
+      if (/^anchor link$/i.test(t)) continue;
+      return t;
+    }
+    return extractOptionLabel(tr);
+  }
+
+  function isProcedureAutocompleteContext(optionSelector, inputEl, opts) {
+    if (opts.procedurePicker) return true;
+    if (isProcedureSearchInput(inputEl)) return true;
+    return /procedures_list|procedures_searchterms/i.test(String(optionSelector || ''));
+  }
+
+  function collectAutocompleteOptions(optionSelector, inputEl, opts) {
+    if (isProcedureAutocompleteContext(optionSelector, inputEl, opts)) {
+      const rows = Array.from(document.querySelectorAll('#procedures_list tbody tr')).filter(
+        (row) => isMedHubProcedureListRow(row) && DOM.isVisible(row)
+      );
+      if (rows.length) {
+        return { options: rows, labelFor: extractMedHubProcedureRowLabel };
+      }
+    }
+    const options = Array.from(document.querySelectorAll(optionSelector || '[role="option"]')).filter(
+      (o) => DOM.isVisible(o) && extractOptionLabel(o).length > 0
+    );
+    return { options, labelFor: extractOptionLabel };
+  }
+
   function findLocationSelect() {
     return document.querySelector('select[name="locationID"]');
   }
@@ -339,8 +383,27 @@
     return stripMd(a) === stripMd(b);
   }
 
+  function isPlaceholderSupervisorOption(label, val) {
+    const l = normalizeMatchKey(label);
+    const v = normalizeMatchKey(val);
+    if (!l && !v) return true;
+    if (l === 'none' || v === 'none' || l === 'selectone') return true;
+    if (/^[-\s]+$/.test(String(label || ''))) return true;
+    return false;
+  }
+
+  function supervisorPrefixMatch(labelKey, queryKey) {
+    if (!labelKey || !queryKey) return false;
+    const min = Math.min(6, queryKey.length);
+    if (labelKey.length < min || queryKey.length < min) return false;
+    return labelKey.startsWith(queryKey) || queryKey.startsWith(labelKey);
+  }
+
   function stripSupervisorContext(label) {
-    return String(label || '').replace(/\s*\(.*/, '').trim();
+    const s = String(label || '').trim();
+    const idx = s.indexOf('(');
+    if (idx <= 0) return s;
+    return s.slice(0, idx).trim();
   }
 
   function supervisorNameParts(value) {
@@ -364,18 +427,165 @@
     const queryParts = supervisorNameParts(query);
     return (
       supervisorNamesMatch(label, query) ||
-      a.startsWith(b) ||
-      b.startsWith(withoutParen) ||
+      supervisorPrefixMatch(a, b) ||
+      (withoutParen.length >= 6 && supervisorPrefixMatch(withoutParen, b)) ||
       (labelParts && queryParts && labelParts.key === queryParts.key)
     );
   }
 
-  function supervisorSearchPlan(query) {
+  function titleCaseWord(s) {
+    const t = String(s || '').trim();
+    if (!t) return t;
+    return t.charAt(0).toUpperCase() + t.slice(1).toLowerCase();
+  }
+
+  function supervisorSearchAttempts(query) {
     const raw = String(query == null ? '' : query).trim();
     const parts = supervisorNameParts(raw);
-    if (!parts) return { search: raw };
-    const search = /['’]/.test(parts.rawLast) ? parts.rawFirst : parts.rawLast;
-    return { search };
+    if (!parts) return [raw];
+    const attempts = [];
+    const seen = new Set();
+    const push = (s) => {
+      const text = String(s || '').trim();
+      const key = normalizeMatchKey(text);
+      if (!key || seen.has(key)) return;
+      seen.add(key);
+      attempts.push(text);
+    };
+    const fullLast = raw.split(',')[0].trim();
+    const lastToken = parts.rawLast;
+    // MedHub Search matches on last name (or first name when last has an apostrophe).
+    // Live page: title-case last name works; ALL CAPS often returns only the first row.
+    // Never use "Last, First" — comma queries return no rows.
+    if (/['’]/.test(lastToken)) {
+      push(titleCaseWord(parts.rawFirst));
+      push(parts.rawFirst);
+    } else {
+      const titledLast = titleCaseWord(lastToken);
+      const titledFirst = titleCaseWord(parts.rawFirst);
+      push(titledLast);
+      push(lastToken);
+      if (fullLast && normalizeMatchKey(fullLast) !== normalizeMatchKey(lastToken)) {
+        push(titleCaseWord(fullLast.split(/\s+/)[0]));
+        push(fullLast);
+      }
+      if (parts.rawFirst) {
+        push(`${titledLast} ${titledFirst}`);
+      }
+    }
+    return attempts;
+  }
+
+  async function clearSupervisorSearchField(inputEl) {
+    inputEl.focus();
+    if (inputEl.isContentEditable) {
+      inputEl.textContent = '';
+    } else {
+      setNativeValue(inputEl, '');
+    }
+    fireInput(inputEl);
+    fireKeystrokes(inputEl);
+    await sleep(30);
+  }
+
+  async function typeSupervisorSearch(inputEl, text, opts = {}) {
+    const charDelayMs = opts.typeCharDelayMs != null ? opts.typeCharDelayMs : 0;
+    const str = String(text);
+    inputEl.focus();
+    if (inputEl.isContentEditable) {
+      inputEl.textContent = '';
+    } else {
+      setNativeValue(inputEl, '');
+    }
+    fireInput(inputEl);
+    for (let i = 0; i < str.length; i++) {
+      const ch = str[i];
+      const partial = str.slice(0, i + 1);
+      if (inputEl.isContentEditable) {
+        inputEl.textContent = partial;
+      } else {
+        setNativeValue(inputEl, partial);
+      }
+      fireInput(inputEl);
+      inputEl.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, key: ch }));
+      inputEl.dispatchEvent(new KeyboardEvent('keyup', { bubbles: true, key: ch }));
+      if (charDelayMs > 0 && i < str.length - 1) await sleep(charDelayMs);
+    }
+  }
+
+  function pickSupervisorFromVisible(visible, query) {
+    const matches = matchingSupervisorOptions(visible, query);
+    if (matches.length === 1) return matches[0];
+    if (matches.length > 1) return pickSupervisorOption(matches, query);
+
+    const queryParts = supervisorNameParts(query);
+    const target = stripSupervisorContext(query);
+    let best = null;
+    let bestScore = -1;
+    for (const o of visible) {
+      const fullLabel = extractOptionLabel(o);
+      const label = stripSupervisorContext(fullLabel);
+      const labelParts = supervisorNameParts(fullLabel);
+      if (queryParts && labelParts) {
+        if (labelParts.key === queryParts.key) {
+          return o;
+        }
+        if (labelParts.first !== queryParts.first) continue;
+      }
+      const s = scoreOption(label, target);
+      if (s >= 40 && s > bestScore) {
+        bestScore = s;
+        best = o;
+      }
+    }
+    return best;
+  }
+
+  async function waitForSupervisorResultList(optionSelector, timeout) {
+    const settleMs = 150;
+    const minWaitAfterFirst = 500;
+    const start = Date.now();
+    let lastLen = 0;
+    let stableAt = start;
+    let firstSeenAt = 0;
+    let latest = [];
+    for (;;) {
+      latest = visibleSupervisorOptions(optionSelector);
+      const len = latest.length;
+      const now = Date.now();
+      if (len > 0 && !firstSeenAt) firstSeenAt = now;
+      if (len > 0) {
+        const waitedSinceFirst = now - firstSeenAt;
+        const stable = len === lastLen && now - stableAt >= settleMs;
+        if (stable && waitedSinceFirst >= minWaitAfterFirst) return latest;
+        if (len !== lastLen) {
+          lastLen = len;
+          stableAt = now;
+        }
+      }
+      if (now - start > timeout) return latest;
+      await sleep(25);
+    }
+  }
+
+  function matchingSupervisorOptions(visible, query) {
+    return visible.filter((o) => supervisorResultMatches(extractOptionLabel(o), query));
+  }
+
+  function pickSupervisorOption(matches, query) {
+    if (matches.length === 1) return matches[0];
+    const target = stripSupervisorContext(query);
+    let best = null;
+    let bestScore = -1;
+    for (const o of matches) {
+      const label = stripSupervisorContext(extractOptionLabel(o));
+      const s = scoreOption(label, target);
+      if (s > bestScore) {
+        bestScore = s;
+        best = o;
+      }
+    }
+    return best;
   }
 
   function findSupervisorListSelect() {
@@ -399,7 +609,8 @@
       const label = (opt.textContent || '').trim();
       const val = (opt.value || '').trim();
       if (!label && !val) continue;
-      if (supervisorNamesMatch(label, query) || supervisorNamesMatch(val, query)) {
+      if (isPlaceholderSupervisorOption(label, val)) continue;
+      if (supervisorResultMatches(label, query) || supervisorResultMatches(val, query)) {
         setNativeValue(selectEl, opt.value);
         fireInput(selectEl);
         // Idealized fixture mirrors the chosen label into a hidden field.
@@ -429,21 +640,35 @@
     return null;
   }
 
+  function supervisorSearchActive() {
+    const method = document.getElementById('supervisor_method');
+    if (method && method.value === 'search') return true;
+    if (findSupervisorChangeButton()) return true;
+    if (findSupervisorSearchInput()) return true;
+    return false;
+  }
+
   async function openSupervisorSearchTab() {
+    const change = findSupervisorChangeButton();
+    if (change) {
+      change.click();
+      await sleep(40);
+      return;
+    }
+    if (findSupervisorSearchInput()) return;
+
     try {
       const win = document.defaultView || root;
       if (win && typeof win.procedures_supervisor_tab === 'function') {
         win.procedures_supervisor_tab('search');
         await sleep(40);
-        await resetSupervisorSearchInput();
         return;
       }
     } catch (_) {}
     const searchTab = findSupervisorSearchTab();
     if (searchTab) {
       searchTab.click();
-      await waitFor(() => findSupervisorSearchInput() || findSupervisorChangeButton(), { timeout: 1500, interval: 50 });
-      await resetSupervisorSearchInput();
+      await waitFor(() => findSupervisorSearchInput() || findSupervisorChangeButton(), { timeout: 800, interval: 40 });
     }
   }
 
@@ -499,21 +724,25 @@
     return false;
   }
 
+  function isVisibleSupervisorSearchInput(el) {
+    return el && isTextEntry(el) && isSupervisorSearchInput(el) && DOM.isVisible(el);
+  }
+
   function findSupervisorSearchInput() {
     const scoped =
       document.querySelector('#procedures_supervisor_pane input[name="searchterms"]') ||
       document.querySelector('#procedures_supervisor_pane #searchterms');
-    if (scoped && isTextEntry(scoped)) return scoped;
+    if (isVisibleSupervisorSearchInput(scoped)) return scoped;
     const byId =
       document.getElementById('supSearch') ||
       document.getElementById('sup_search') ||
       document.getElementById('supervisor_search') ||
       document.getElementById('searchterms') ||
       document.querySelector('input[name="supervisor_search"], input[name="searchterms"]');
-    if (byId && isTextEntry(byId) && isSupervisorSearchInput(byId)) return byId;
+    if (isVisibleSupervisorSearchInput(byId)) return byId;
     const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])');
     for (const el of nodes) {
-      if (isTextEntry(el) && isSupervisorSearchInput(el)) return el;
+      if (isVisibleSupervisorSearchInput(el)) return el;
     }
     return null;
   }
@@ -538,8 +767,8 @@
     const change = findSupervisorChangeButton();
     if (!change) return null;
     change.click();
-    await sleep(80);
-    return waitFor(() => findSupervisorSearchInput(), { timeout: 2000, interval: 50 });
+    await sleep(40);
+    return waitFor(() => findSupervisorSearchInput(), { timeout: 800, interval: 40 });
   }
 
   // ---- Procedure search input ----------------------------------------------
@@ -648,104 +877,67 @@
   }
 
   async function selectSupervisorFromSearch(inputEl, optionSelector, query, opts = {}) {
-    if (!inputEl || !DOM.isVisible(inputEl)) {
+    inputEl = (await resetSupervisorSearchInput()) || inputEl;
+    if (!inputEl) {
       await openSupervisorSearchTab();
-      inputEl = await resetSupervisorSearchInput();
+      inputEl = (await resetSupervisorSearchInput()) || findSupervisorSearchInput();
     }
     if (!inputEl) throw new Error('Supervisor search input not found');
 
-    const plan = supervisorSearchPlan(query);
-    const q = plan.search;
-    if (!q) throw new Error('Empty supervisor value');
+    const attempts = supervisorSearchAttempts(query);
+    if (!attempts.length) throw new Error('Empty supervisor value');
 
     const timeout = opts.autocompleteTimeoutMs != null ? opts.autocompleteTimeoutMs : 9000;
-    const charDelayMs = opts.typeCharDelayMs != null ? opts.typeCharDelayMs : DEFAULT_TYPE_CHAR_MS;
-    const quickWaitMs = Math.max(charDelayMs + 60, 100);
+    const perAttemptTimeout = Math.min(timeout, 3000);
+    const typeOpts = { typeCharDelayMs: opts.typeCharDelayMs };
 
-    inputEl.focus();
-    if (inputEl.isContentEditable) {
-      inputEl.textContent = '';
-    } else {
-      setNativeValue(inputEl, '');
-    }
-    fireInput(inputEl);
+    for (const searchText of attempts) {
+      await clearSupervisorSearchField(inputEl);
+      await typeSupervisorSearch(inputEl, searchText, typeOpts);
+      const visible = await waitForSupervisorResultList(optionSelector, perAttemptTimeout);
+      if (!visible.length) continue;
 
-    for (let len = 1; len <= q.length; len++) {
-      const partial = q.slice(0, len);
-      if (inputEl.isContentEditable) {
-        inputEl.textContent = partial;
-      } else {
-        setNativeValue(inputEl, partial);
-      }
-      fireInput(inputEl);
-      fireKeystrokes(inputEl);
-
-      await waitFor(() => visibleSupervisorOptions(optionSelector).length > 0, {
-        timeout: len < q.length ? quickWaitMs : timeout,
-        interval: 25
-      });
-      const visible = visibleSupervisorOptions(optionSelector);
-
-      if (visible.length === 1) {
-        const chosen = extractOptionLabel(visible[0]);
-        if (!supervisorResultMatches(chosen, query)) {
-          if (len < q.length) {
-            if (charDelayMs > 0) await sleep(charDelayMs);
-            continue;
-          }
-          throw new Error(`Supervisor result "${chosen}" does not match "${query}"`);
-        }
-        visible[0].click();
+      const pick = pickSupervisorFromVisible(visible, query);
+      if (pick) {
+        const chosen = extractOptionLabel(pick);
+        pick.click();
         await sleep(50);
         return stripSupervisorContext(chosen) || chosen;
       }
-      if (visible.length === 0 && len < q.length) {
-        if (charDelayMs > 0) await sleep(charDelayMs);
-        continue;
-      }
-      if (visible.length > 1 && len < q.length) {
-        if (charDelayMs > 0) await sleep(charDelayMs);
-        continue;
-      }
-
-      if (visible.length === 0) {
-        throw new Error(`No autocomplete results for "${query}"`);
-      }
-      const exact = visible.find((o) => supervisorResultMatches(extractOptionLabel(o), query));
-      if (exact) {
-        const chosen = extractOptionLabel(exact);
-        exact.click();
-        await sleep(50);
-        return stripSupervisorContext(chosen) || chosen;
-      }
-      throw new Error(`Multiple supervisor matches for "${query}" (${visible.length} results)`);
     }
 
-    throw new Error(`Could not resolve supervisor "${query}"`);
+    const remaining = visibleSupervisorOptions(optionSelector);
+    if (remaining.length) {
+      const labels = remaining.map((o) => extractOptionLabel(o)).slice(0, 5).join('; ');
+      throw new Error(`No supervisor match for "${query}" among ${remaining.length} result(s): ${labels}`);
+    }
+    throw new Error(`No autocomplete results for "${query}"`);
   }
 
   async function selectSupervisor(query, step, opts = {}) {
-    const listSelect = findSupervisorListSelect();
-    if (listSelect) {
-      const fromList = trySelectSupervisorFromList(listSelect, query);
-      if (fromList) return fromList;
+    let inputEl = await resetSupervisorSearchInput();
+
+    if (!inputEl && !supervisorSearchActive()) {
+      const listSelect = findSupervisorListSelect();
+      if (listSelect) {
+        const fromList = trySelectSupervisorFromList(listSelect, query);
+        if (fromList) return fromList;
+      }
     }
 
-    let inputEl = findSupervisorSearchInput();
     if (!inputEl) {
-      const resolved = DOM.resolveElement(step.candidates);
-      if (resolved && isSupervisorSearchInput(resolved)) inputEl = resolved;
+      inputEl = findSupervisorSearchInput();
+      if (!inputEl) {
+        const resolved = DOM.resolveElement(step.candidates);
+        if (resolved && isVisibleSupervisorSearchInput(resolved)) inputEl = resolved;
+      }
     }
     if (!inputEl) {
       await openSupervisorSearchTab();
-      inputEl = await waitFor(() => {
-        const found = findSupervisorSearchInput();
-        if (found) return found;
-        const resolved = DOM.resolveElement(step.candidates);
-        return resolved && isSupervisorSearchInput(resolved) ? resolved : null;
-      }, { timeout: 3000, interval: 80 });
+      inputEl =
+        (await resetSupervisorSearchInput()) ||
+        (await waitFor(() => findSupervisorSearchInput(), { timeout: 800, interval: 40 }));
     }
-    if (!inputEl) inputEl = await resetSupervisorSearchInput();
     if (!inputEl) {
       const tab = findSupervisorSearchTab();
       throw new Error(`Supervisor search input not found for "${query}"${tab ? ' after opening Search tab' : ' (Search tab not found)'}`);
@@ -776,11 +968,14 @@
   async function selectFromAutocomplete(inputEl, optionSelector, query, opts = {}) {
     const timeout = opts.autocompleteTimeoutMs != null ? opts.autocompleteTimeoutMs : 9000;
     const charDelayMs = opts.typeCharDelayMs != null ? opts.typeCharDelayMs : 0;
+    const procedureCtx = isProcedureAutocompleteContext(optionSelector, inputEl, opts);
     await typeInto(inputEl, query, { charDelayMs });
+    let labelFor = extractOptionLabel;
     const options = await waitFor(
       () => {
-        const list = Array.from(document.querySelectorAll(optionSelector || '[role="option"]'))
-          .filter((o) => DOM.isVisible(o) && extractOptionLabel(o).length > 0);
+        const collected = collectAutocompleteOptions(optionSelector, inputEl, opts);
+        labelFor = collected.labelFor;
+        const list = collected.options.filter((o) => DOM.isVisible(o) && labelFor(o).length > 0);
         return list.length ? list : null;
       },
       { timeout }
@@ -791,21 +986,27 @@
     let best = null;
     let bestScore = -1;
     let bestLabelLen = Infinity;
-    for (const o of options) {
-      const label = extractOptionLabel(o);
-      const s = scoreOption(label, query);
-      // Same score → shorter label wins (Biopsy beats Biopsy w/ scalpel on substring ties).
-      if (s > bestScore || (s === bestScore && s > 0 && label.length < bestLabelLen)) {
-        bestScore = s;
-        best = o;
-        bestLabelLen = label.length;
+    if (procedureCtx && options.length === 1) {
+      best = options[0];
+      bestScore = 100;
+    } else {
+      for (const o of options) {
+        const label = labelFor(o);
+        const s = scoreOption(label, query);
+        if (s < 40) continue;
+        // Same score → shorter label wins (Biopsy beats Biopsy w/ scalpel on substring ties).
+        if (s > bestScore || (s === bestScore && label.length < bestLabelLen)) {
+          bestScore = s;
+          best = o;
+          bestLabelLen = label.length;
+        }
       }
     }
     if (!best || bestScore < 40) {
-      const hint = best ? extractOptionLabel(best) : 'none';
+      const hint = best ? labelFor(best) : 'none';
       throw new Error(`No good match for "${query}" (best option: "${String(hint).slice(0, 60)}")`);
     }
-    const chosenText = extractOptionLabel(best);
+    const chosenText = labelFor(best);
     // Some forms (e.g. MedHub's procedure list) require clicking a control
     // *inside* the matched row (a "+" add link) rather than the row text. If a
     // relative click target was recorded, use it; otherwise click the match.
@@ -881,181 +1082,336 @@
     }
   }
 
-  function isProcedureRemoveControl(el) {
-    if (!el || el.nodeType !== 1) return false;
-    const tag = el.tagName.toLowerCase();
-    const type = String(el.getAttribute('type') || '').toLowerCase();
-    if (tag !== 'a' && tag !== 'button' && el.getAttribute('role') !== 'button' && !(tag === 'input' && ['button', 'submit', 'image'].includes(type))) return false;
-    const hay = `${el.className || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.value || ''}`.toLowerCase();
-    if (/\bremove\b|\bdelete\b|\bunspec/.test(hay)) return true;
-    const txt = (el.textContent || '').trim();
-    return /\bdelete\b/i.test(txt) || txt === '×' || txt === '✕' || txt === 'X' || txt === 'x';
+  const MEDHUB_PROC_DELETE_SEL =
+    'a[aria-label="Delete"][href*="procedures_delete"], a.button[href*="procedures_delete"], a[href*="procedures_delete"]';
+
+  function runInPageContext(fnBody) {
+    const script = document.createElement('script');
+    script.textContent = `(function(){try{${fnBody}}catch(e){}})();`;
+    const parent = document.head || document.documentElement;
+    parent.appendChild(script);
+    script.remove();
   }
 
-  function isSelectedProcedureTable(table) {
-    if (!table || table.nodeType !== 1) return false;
-    const text = normalizeMatchKey(table.textContent || '');
-    return text.includes('procedure') && text.includes('actions') && text.includes('role');
+  function isFilledProcedureTitle(text) {
+    const t = String(text == null ? '' : text).trim();
+    if (!t) return false;
+    if (/^[-\s.]+$/.test(t)) return false;
+    const key = normalizeMatchKey(t);
+    if (!key || key === 'norequired' || key === 'noprocedures') return false;
+    return true;
   }
 
-  function findProceduresTable() {
-    const byId = document.getElementById('selected_procedures');
-    if (byId) return byId;
-    for (const heading of document.querySelectorAll('h1, h2, h3, .mhSectionHeader, caption')) {
-      const text = (heading.textContent || '').trim();
-      if (!/^procedures\b/i.test(text)) continue;
-      let sibling = heading.nextElementSibling;
-      while (sibling) {
-        if (sibling.tagName === 'TABLE') return sibling;
-        const nested = sibling.querySelector && sibling.querySelector('table');
-        if (nested) return nested;
-        sibling = sibling.nextElementSibling;
-      }
-    }
-    for (const table of document.querySelectorAll('table')) {
-      if (isSelectedProcedureTable(table)) return table;
-    }
-    return null;
+  function isProwSlotActive(index) {
+    const titleEl = document.getElementById(`prow_${index}_title`);
+    if (!isFilledProcedureTitle(titleEl && titleEl.textContent)) return false;
+    const tr = document.getElementById(`prow_${index}`);
+    if (!tr) return true;
+    const deleteLink = tr.querySelector('a[href*="procedures_delete"]');
+    if (!deleteLink) return true;
+    const linkVis = DOM.isVisible(deleteLink);
+    const rowVis = DOM.isVisible(tr);
+    // Live MedHub hides deleted rows but may leave stale title text in the DOM.
+    if (!linkVis && !rowVis) return false;
+    return true;
   }
 
-  function isProcedureTableDeleteControl(el) {
+  function procedureRowHasContent(tr) {
+    if (!tr || tr.id === 'prow_0' || tr.id === 'noProcRow') return false;
+    if (tr.querySelector('th')) return false;
+    if (normalizeMatchKey(tr.textContent || '').includes('noprocedures')) return false;
+    const prowMatch = tr.id && tr.id.match(/^prow_(\d+)$/);
+    if (prowMatch) return isProwSlotActive(Number(prowMatch[1]));
+    const text = (tr.textContent || '').replace(/\s+/g, ' ').trim();
+    return text.length >= 12 && /\bdelete\b/i.test(text);
+  }
+
+  function isMedHubProcedureDeleteLink(el) {
     if (!el || el.nodeType !== 1) return false;
     if (el.closest('#procedures_list, #AddStandardProcedure')) return false;
-    const label = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.value || ''}`;
-    return /\bdelete\b/i.test(label) || isProcedureRemoveControl(el);
+    const hay = `${el.getAttribute('href') || ''} ${el.getAttribute('aria-label') || ''}`;
+    if (!/procedures_delete\s*\(/i.test(hay)) return false;
+    const tr = el.closest('tr');
+    if (!tr) return false;
+    return procedureRowHasContent(tr);
   }
 
-  function isVisibleProcedureRow(row) {
-    if (!row || row.nodeType !== 1) return false;
-    if (row.id === 'prow_0' || row.id === 'noProcRow') return false;
-    const rowText = normalizeMatchKey(row.textContent || '');
-    if (rowText.includes('noprocedures') || rowText.includes('norequired')) return false;
-    if (row.id && /^prow_\d+$/.test(row.id)) {
-      const cls = String(row.className || '');
-      if (/\bhidden\b/.test(cls)) return false;
-      const titleEl = document.getElementById(row.id + '_title');
-      if (titleEl && (titleEl.textContent || '').trim()) return true;
-      return DOM.isVisible(row);
-    }
-    return DOM.isVisible(row);
-  }
-
-  function findVisibleProcedureRows() {
-    const rows = [];
+  function findMedHubProcedureDeleteLinks() {
+    const links = [];
     const seen = new Set();
-    const table = findProceduresTable();
-    if (table) {
-      for (const row of table.querySelectorAll('tr')) {
-        if (!isVisibleProcedureRow(row) || seen.has(row)) continue;
-        seen.add(row);
-        rows.push(row);
+    for (const el of document.querySelectorAll(MEDHUB_PROC_DELETE_SEL)) {
+      if (!isMedHubProcedureDeleteLink(el) || seen.has(el)) continue;
+      seen.add(el);
+      links.push(el);
+    }
+    return links;
+  }
+
+  function countLegacySelectedProcedures() {
+    return document.querySelectorAll('#selectedProcs .selected_proc').length;
+  }
+
+  function countActiveProceduresOnForm() {
+    return countFilledProcedureSlots() + countLegacySelectedProcedures();
+  }
+
+  function clearLegacySelectedProcedures() {
+    for (const el of document.querySelectorAll('#selectedProcs a.remove, #selectedProcs button.remove')) {
+      try {
+        el.click();
+      } catch (_) {}
+    }
+  }
+
+  function countFilledProcedureSlots() {
+    let n = 0;
+    for (let i = 1; i <= 20; i++) {
+      if (isProwSlotActive(i)) n++;
+    }
+    return n;
+  }
+
+  function countRemainingProcedures() {
+    return countActiveProceduresOnForm();
+  }
+
+  function countMedHubProcedureDeleteLinks() {
+    return findMedHubProcedureDeleteLinks().length;
+  }
+
+  function summarizeProcedureDeleteLinks() {
+    return findMedHubProcedureDeleteLinks().map((el) => {
+      const tr = el.closest('tr');
+      return {
+        href: el.getAttribute('href') || '',
+        ariaLabel: el.getAttribute('aria-label') || '',
+        rowId: (tr && tr.id) || '',
+        rowClass: (tr && tr.className) || '',
+        linkVisible: DOM.isVisible(el),
+        rowVisible: tr ? DOM.isVisible(tr) : false,
+        hasContent: tr ? procedureRowHasContent(tr) : false
+      };
+    });
+  }
+
+  function diagnoseRawProcedureDeleteAnchors() {
+    const out = [];
+    for (const el of document.querySelectorAll(MEDHUB_PROC_DELETE_SEL)) {
+      if (el.closest('#procedures_list, #AddStandardProcedure')) continue;
+      const tr = el.closest('tr');
+      out.push({
+        href: el.getAttribute('href') || '',
+        rowId: (tr && tr.id) || '',
+        rowClass: (tr && tr.className) || '',
+        linkVisible: DOM.isVisible(el),
+        rowVisible: tr ? DOM.isVisible(tr) : false,
+        hasContent: tr ? procedureRowHasContent(tr) : false,
+        eligible: isMedHubProcedureDeleteLink(el)
+      });
+    }
+    return out;
+  }
+
+  function countRawProcedureDeleteAnchors() {
+    let n = 0;
+    for (const el of document.querySelectorAll(MEDHUB_PROC_DELETE_SEL)) {
+      if (el.closest('#procedures_list, #AddStandardProcedure')) continue;
+      n++;
+    }
+    return n;
+  }
+
+  function emitProcedureClearDebug(data) {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+      chrome.runtime
+        .sendMessage({
+          type: MSG.DEBUG_EVENT,
+          payload: { kind: 'procedure:clear', source: 'engine', ...data }
+        })
+        .catch(() => {});
+    } catch (_) {}
+  }
+
+  function clearProceduresInPageContext() {
+    runInPageContext(`
+      (function () {
+        function titleFilled(text) {
+          var t = String(text == null ? '' : text).trim();
+          if (!t) return false;
+          if (/^[-\\s.]+$/.test(t)) return false;
+          return true;
+        }
+        function rowHasContent(tr) {
+          if (!tr || tr.id === 'prow_0') return false;
+          if (tr.querySelector('th')) return false;
+          var m = tr.id && tr.id.match(/^prow_(\\d+)$/);
+          if (m) {
+            var title = document.getElementById('prow_' + m[1] + '_title');
+            return titleFilled(title && title.textContent);
+          }
+          return (tr.textContent || '').replace(/\\s+/g, ' ').trim().length >= 12;
+        }
+        var sel = 'a[aria-label="Delete"][href*="procedures_delete"], a.button[href*="procedures_delete"], a[href*="procedures_delete"]';
+        if (typeof procedures_delete === 'function') {
+          for (var i = 1; i <= 20; i++) {
+            var title = document.getElementById('prow_' + i + '_title');
+            if (titleFilled(title && title.textContent)) try { procedures_delete(i); } catch (e) {}
+          }
+        }
+        document.querySelectorAll(sel).forEach(function (el) {
+          if (el.closest('#procedures_list') || el.closest('#AddStandardProcedure')) return;
+          var tr = el.closest('tr');
+          if (tr && !rowHasContent(tr)) return;
+          var m = (el.getAttribute('href') || '').match(/procedures_delete\\s*\\(\\s*(\\d+)\\s*\\)/);
+          if (m && typeof procedures_delete === 'function') try { procedures_delete(Number(m[1])); } catch (e) {}
+          try { el.click(); } catch (e) {}
+        });
+      })();
+    `);
+  }
+
+  const MAIN_WORLD_MSG_TIMEOUT_MS = 2500;
+
+  async function invokeProceduresDeleteInMainWorld(deleteIndex) {
+    let usedFallback = false;
+    const fallback = () => {
+      usedFallback = true;
+      if (deleteIndex != null && !Number.isNaN(deleteIndex)) {
+        runInPageContext(`if(typeof procedures_delete==='function')procedures_delete(${deleteIndex});`);
+      } else {
+        clearProceduresInPageContext();
       }
-    }
-    for (const row of document.querySelectorAll('tr[id^="prow_"]')) {
-      if (seen.has(row)) continue;
-      if (!isVisibleProcedureRow(row)) continue;
-      seen.add(row);
-      rows.push(row);
-    }
-    return rows;
-  }
-
-  function procedureDeleteIndexFromControl(el) {
-    if (!el) return null;
-    const href = el.getAttribute('href') || '';
-    const onclick = el.getAttribute('onclick') || '';
-    const hay = `${href} ${onclick}`;
-    const m = hay.match(/procedures_delete\s*\(\s*(\d+)\s*\)/);
-    return m ? Number(m[1]) : null;
-  }
-
-  function invokeProcedureDelete(control) {
-    if (!control) return false;
-    const idx = procedureDeleteIndexFromControl(control);
-    if (idx != null && typeof window.procedures_delete === 'function') {
-      window.procedures_delete(idx);
-      return true;
+    };
+    if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) {
+      fallback();
+      const remaining = countRemainingProcedures();
+      emitProcedureClearDebug({
+        phase: 'main-world',
+        deleteIndex,
+        ok: false,
+        error: 'no chrome.runtime',
+        usedFallback,
+        remaining
+      });
+      return { ok: false, remaining, error: 'no chrome.runtime', usedFallback };
     }
     try {
-      control.click();
-      return true;
-    } catch (_) {}
-    return false;
-  }
-
-  function findProcedureDeleteButtons() {
-    const buttons = [];
-    const seen = new Set();
-    for (const row of findVisibleProcedureRows()) {
-      for (const el of row.querySelectorAll('a, button, input, [role="button"]')) {
-        if (!isProcedureTableDeleteControl(el)) continue;
-        if (seen.has(el)) continue;
-        seen.add(el);
-        buttons.push(el);
-      }
+      const res = await Promise.race([
+        new Promise((resolve) => {
+          try {
+            chrome.runtime.sendMessage(
+              { type: MSG.CLEAR_PROCEDURES_PAGE, payload: { index: deleteIndex } },
+              (response) => {
+                const err = chrome.runtime.lastError;
+                if (err) resolve({ ok: false, error: err.message });
+                else resolve(response || { ok: false, error: 'empty response' });
+              }
+            );
+          } catch (err) {
+            resolve({ ok: false, error: err.message || 'sendMessage failed' });
+          }
+        }),
+        new Promise((resolve) => setTimeout(() => resolve({ ok: false, error: 'timeout' }), MAIN_WORLD_MSG_TIMEOUT_MS))
+      ]);
+      if (!res.ok) fallback();
+      const remaining =
+        typeof res.remaining === 'number' ? res.remaining : countRemainingProcedures();
+      emitProcedureClearDebug({
+        phase: 'main-world',
+        deleteIndex,
+        ok: res.ok,
+        error: res.error || null,
+        usedFallback,
+        remaining
+      });
+      return { ok: res.ok, remaining, error: res.error, usedFallback };
+    } catch (err) {
+      fallback();
+      const remaining = countRemainingProcedures();
+      emitProcedureClearDebug({
+        phase: 'main-world',
+        deleteIndex,
+        ok: false,
+        error: err.message || 'invoke failed',
+        usedFallback,
+        remaining
+      });
+      return { ok: false, remaining, error: err.message, usedFallback };
     }
-    const table = findProceduresTable();
-    if (table) {
-      for (const el of table.querySelectorAll(
-        'a[href*="procedures_delete"], button[onclick*="procedures_delete"], [onclick*="procedures_delete"]'
-      )) {
-        if (seen.has(el)) continue;
-        const row = el.closest('tr');
-        if (row && !isVisibleProcedureRow(row)) continue;
-        if (!isProcedureTableDeleteControl(el)) continue;
-        seen.add(el);
-        buttons.push(el);
-      }
-    }
-    return buttons;
   }
 
   async function clearSelectedProcedures(fieldDelayMs = 100) {
-    const table = findProceduresTable();
-    if (table && typeof table.scrollIntoView === 'function') {
+    const pause = Math.min(fieldDelayMs, 60);
+    const rawAnchors = countRawProcedureDeleteAnchors();
+    const filledSlots = countActiveProceduresOnForm();
+    const initialLinks = summarizeProcedureDeleteLinks();
+    const initial = initialLinks.length;
+    const anchorDiag = diagnoseRawProcedureDeleteAnchors();
+
+    emitProcedureClearDebug({
+      phase: 'start',
+      rawAnchors,
+      eligibleLinks: initial,
+      filledSlots,
+      links: initialLinks,
+      anchorDiag,
+      selectedProceduresId: document.getElementById('selected_procedures') ? 'found' : 'missing',
+      forceMainWorld: rawAnchors > 0 && initial === 0
+    });
+
+    if (filledSlots === 0) {
+      emitProcedureClearDebug({ phase: 'done', cleared: 0, remaining: 0, attempts: 0, skipped: true });
+      return { cleared: 0, remaining: 0, attempts: 0 };
+    }
+
+    const toClear = filledSlots;
+    const scrollTarget =
+      document.querySelector('#selected_procedures a[aria-label="Delete"][href*="procedures_delete"]') ||
+      findMedHubProcedureDeleteLinks()[0];
+    if (scrollTarget && typeof scrollTarget.scrollIntoView === 'function') {
       try {
-        table.scrollIntoView({ block: 'center' });
+        scrollTarget.scrollIntoView({ block: 'center' });
       } catch (_) {}
     }
-    let cleared = 0;
-    const pause = Math.max(80, Math.min(fieldDelayMs, 150));
-    for (let attempt = 0; attempt < 40; attempt++) {
-      let acted = false;
-      for (const row of findVisibleProcedureRows()) {
-        if (abortFlag) break;
-        const prowMatch = row.id && row.id.match(/^prow_(\d+)$/);
-        if (prowMatch && typeof window.procedures_delete === 'function') {
-          window.procedures_delete(Number(prowMatch[1]));
-          cleared++;
-          acted = true;
-          await sleep(pause);
-          continue;
-        }
-        for (const el of row.querySelectorAll('a, button, input, [role="button"]')) {
-          if (!isProcedureTableDeleteControl(el)) continue;
-          invokeProcedureDelete(el);
-          cleared++;
-          acted = true;
-          await sleep(pause);
-          break;
-        }
-      }
-      if (!acted) {
-        const buttons = findProcedureDeleteButtons();
-        if (!buttons.length) break;
-        for (const btn of buttons) {
-          if (abortFlag) break;
-          invokeProcedureDelete(btn);
-          cleared++;
-          await sleep(pause);
-        }
-        acted = buttons.length > 0;
-      }
-      if (!findVisibleProcedureRows().length) break;
-      if (!acted) break;
-      await sleep(120);
+
+    let attempts = 0;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      if (abortFlag) break;
+      attempts = attempt + 1;
+      const before = countActiveProceduresOnForm();
+      if (!before) break;
+      const res = await invokeProceduresDeleteInMainWorld(null);
+      clearLegacySelectedProcedures();
+      await sleep(pause + 40);
+      const after =
+        typeof res.remaining === 'number'
+          ? res.remaining + countLegacySelectedProcedures()
+          : countActiveProceduresOnForm();
+      emitProcedureClearDebug({
+        phase: 'attempt',
+        attempt: attempts,
+        before,
+        after,
+        mainWorldOk: res.ok,
+        mainWorldError: res.error || null,
+        usedFallback: res.usedFallback || false
+      });
+      if (!after) break;
     }
-    return cleared;
+
+    const remaining = countActiveProceduresOnForm();
+    const result = { cleared: toClear, remaining, attempts };
+    emitProcedureClearDebug({
+      phase: 'done',
+      cleared: toClear,
+      remaining,
+      attempts,
+      success: remaining === 0,
+      linksAfter: summarizeProcedureDeleteLinks(),
+      filledSlotsAfter: countActiveProceduresOnForm()
+    });
+    return result;
   }
 
   function findLogAnotherCheckbox() {
@@ -1121,13 +1477,18 @@
       onAction(full);
     };
 
-    const clearedProcs = await clearSelectedProcedures(fieldDelayMs);
-    if (clearedProcs > 0) {
+    const procClear = await clearSelectedProcedures(fieldDelayMs);
+    if (procClear.cleared > 0 || procClear.remaining > 0) {
+      const outcome = procClear.remaining === 0 ? 'success' : 'failed';
+      const detail =
+        procClear.remaining === 0
+          ? `Cleared ${procClear.cleared} prior procedure(s) in ${procClear.attempts} attempt(s)`
+          : `Procedure cleanup incomplete: ${procClear.cleared} procedure(s) on form, ${procClear.remaining} remain after ${procClear.attempts} attempt(s) — open Debug Log (filter procedure:clear)`;
       record({
         field: FIELD.PROCEDURE,
         role: ROLE.CLICK,
-        outcome: 'success',
-        detail: `Cleared ${clearedProcs} prior procedure(s)`
+        outcome,
+        detail
       });
     }
 
@@ -1138,12 +1499,16 @@
       }
 
       try {
-        const el = await waitFor(() => {
+        const resolveStepElement = () => {
           const found = DOM.resolveElement(step.candidates);
           if (!found) return null;
           if (shouldResolveWithoutVisibility(step, found)) return found;
           return DOM.isVisible(found) ? found : null;
-        });
+        };
+        const el =
+          step.role === ROLE.AUTOCOMPLETE && step.field === FIELD.SUPERVISOR
+            ? resolveStepElement()
+            : await waitFor(resolveStepElement);
         const needsVisibleEl =
           step.role !== ROLE.SUBMIT &&
           !isSkippableSupervisorNavClick(step) &&
@@ -1249,7 +1614,11 @@
               }
               try {
                 const searchValue = procedureSearchQuery(proc);
-                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, searchValue, { ...acOpts, clickRel: step.clickRel });
+                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, searchValue, {
+                  ...acOpts,
+                  clickRel: step.clickRel,
+                  procedurePicker: true
+                });
                 record({
                   field: step.field,
                   role: step.role,

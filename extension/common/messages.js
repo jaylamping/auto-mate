@@ -20,6 +20,7 @@
     OPEN_DEBUG_LOG: 'faa:open-debug-log',
     DEBUG_EVENT: 'faa:debug-event',
     CLEAR_DEBUG_LOG: 'faa:clear-debug-log',
+    CLEAR_PROCEDURES_PAGE: 'faa:clear-procedures-page',
     // Content -> side panel
     PONG: 'faa:pong',
     STEP_RECORDED: 'faa:step-recorded',
@@ -33,7 +34,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '49';
+  const BUILD_ID = '64';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
