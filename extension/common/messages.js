@@ -17,6 +17,9 @@
     HIGHLIGHT_FIELD: 'faa:highlight-field',
     SCAN_FORM: 'faa:scan-form',
     CLEAR_OVERLAY: 'faa:clear-overlay',
+    OPEN_DEBUG_LOG: 'faa:open-debug-log',
+    DEBUG_EVENT: 'faa:debug-event',
+    CLEAR_DEBUG_LOG: 'faa:clear-debug-log',
     // Content -> side panel
     PONG: 'faa:pong',
     STEP_RECORDED: 'faa:step-recorded',
@@ -30,7 +33,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '23';
+  const BUILD_ID = '48';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {
@@ -75,6 +78,7 @@
     RECIPE: 'faa.recipe',
     MAPPING: 'faa.mapping',
     DATA_SESSION: 'faa.dataSession',
+    DEBUG_LOG: 'faa.debugLog',
     SETTINGS: 'faa.settings'
   };
 

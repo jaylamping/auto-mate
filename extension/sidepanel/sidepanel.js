@@ -49,6 +49,23 @@
     toast._t = setTimeout(() => t.classList.add('hidden'), ms);
   }
 
+  function sendDebugEvent(kind, data = {}) {
+    try {
+      chrome.runtime
+        .sendMessage({
+          type: MSG.DEBUG_EVENT,
+          payload: {
+            kind,
+            activeTab: getActiveTabName(),
+            mapping: { ...state.mapping },
+            requiredMissing: missingRequiredMappingKeys(),
+            ...data
+          }
+        })
+        .catch(() => {});
+    } catch (_) {}
+  }
+
   function headersEqual(a, b) {
     if (!a || !b || a.length !== b.length) return false;
     for (let i = 0; i < a.length; i++) {
@@ -270,6 +287,7 @@
       if (!col) continue;
       state.mapping[key] = col;
       changed = true;
+      sendDebugEvent('mapping:auto-header', { field: key, column: col });
     }
     if (changed) {
       rebuildEngineRows();
@@ -592,12 +610,15 @@
         break;
       case MSG.DIAG_EVENT:
         state.diagEvents.push(message.payload);
+        sendDebugEvent('diag:event', message.payload || {});
         updateDiagExportUI();
         break;
       case MSG.ACTION_LOG:
+        sendDebugEvent('run:action', message.payload || {});
         onActionLog(message.payload);
         break;
       case MSG.ROW_DONE:
+        sendDebugEvent('run:row-done', message.payload || {});
         if (state.rowResolver) state.rowResolver(message.payload);
         break;
       case MSG.ENGINE_ERROR:
@@ -651,6 +672,11 @@
     if (!shouldRunFieldMapping(step)) return;
     const mapKey = STEP_FIELD_TO_MAP[step._field];
     if (!mapKey) return;
+    sendDebugEvent('learn:field-input', {
+      field: mapKey,
+      sampleValue: step.sampleValue || '',
+      text: step.text || ''
+    });
     applyStepFormBinding(step);
     if (live.blurred) inferAndSetColumnForField(mapKey, step);
     refreshLearnStepNav();
@@ -659,6 +685,15 @@
   function onStepRecorded(step) {
     state.recordedSteps.push(step);
     normalizeLearnStep(step);
+    sendDebugEvent('learn:step-recorded', {
+      field: step._field || '',
+      role: step.role || '',
+      text: step.text || '',
+      sampleValue: step.sampleValue || '',
+      sampleOptionText: step.sampleOptionText || '',
+      optionSelector: step.optionSelector || '',
+      candidates: step.candidates || []
+    });
     if (isProcedureLearnStep(step)) {
       revealProcedureInMapping(step);
     } else {
@@ -745,6 +780,7 @@
 
     const changed = state.mapping[mapKey] !== col || stolen;
     state.mapping[mapKey] = col;
+    sendDebugEvent('mapping:set', { field: mapKey, column: col, source: flash ? 'ui-or-infer' : 'infer' });
     if (mapKey !== FIELD.PROCEDURE) discoverField(mapKey);
     renderFormMapping();
     if (changed) {
@@ -1129,7 +1165,7 @@
     const staticLocation = defaultStaticLocation();
     state.engineRows = PARSER.buildEngineRows(state.parsed, state.mapping, {
       location: staticLocation == null ? 'IMC' : staticLocation
-    });
+    }).map((row, index) => ({ ...row, _sourceIndex: index }));
     refreshRunReadiness();
     refreshLearnStepNav();
   }
@@ -1282,6 +1318,7 @@
         logLine(msg, 'failed');
         state.session.rows.push({
           index: i,
+          sourceIndex: row._sourceIndex,
           mrn: row.mrn,
           result: { ok: false, actions: [], skipped: true, missingFields: missing }
         });
@@ -1290,7 +1327,7 @@
       }
       logLine(`Row ${i + 1}/${state.engineRows.length} - MRN ${row.mrn || 'n/a'}`, 'info');
       const result = await runOneRow(row, i, state.engineRows.length, dryRun, fieldDelayMs);
-      state.session.rows.push({ index: i, mrn: row.mrn, result: result.result });
+      state.session.rows.push({ index: i, sourceIndex: row._sourceIndex, mrn: row.mrn, result: result.result });
       updateProgress(i + 1, state.engineRows.length);
       if (result.result && result.result.aborted) {
         logLine('Stopped during row.', 'aborted');
@@ -1416,7 +1453,55 @@
     const s = REPORT.summarize(state.session);
     $('#reportSummary').innerHTML = renderReportSummaryHtml(s, state.reportFilter);
     $('#reportBody').innerHTML = REPORT.toBodyHtml(state.session, { filter: state.reportFilter });
+    refreshRetryCsvButton();
     wireReportFilters();
+  }
+
+  function retrySourceIndexes() {
+    if (!state.session || state.session.dryRun || !state.parsed || !state.engineRows.length) return [];
+    const submitted = new Set();
+    for (const row of state.session.rows || []) {
+      if (row?.result?.ok) {
+        const sourceIndex = row.sourceIndex != null ? row.sourceIndex : state.engineRows[row.index]?._sourceIndex;
+        if (sourceIndex != null) submitted.add(sourceIndex);
+      }
+    }
+    return state.engineRows
+      .map((row, engineIndex) => ({
+        sourceIndex: row._sourceIndex != null ? row._sourceIndex : engineIndex,
+        engineIndex
+      }))
+      .filter(({ sourceIndex }) => !submitted.has(sourceIndex))
+      .map(({ sourceIndex }) => sourceIndex);
+  }
+
+  function retryCsvRows() {
+    const seen = new Set();
+    const rows = [];
+    for (const sourceIndex of retrySourceIndexes()) {
+      if (seen.has(sourceIndex)) continue;
+      seen.add(sourceIndex);
+      const original = state.parsed.rows[sourceIndex];
+      if (original) rows.push(original);
+    }
+    return rows;
+  }
+
+  function toOriginalCsv(rows) {
+    const headers = state.parsed?.headers || [];
+    const csvRows = [headers, ...rows.map((row) => headers.map((h) => row[h] == null ? '' : row[h]))];
+    return csvRows
+      .map((row) => row.map((cell) => `"${String(cell).replace(/"/g, '""')}"`).join(','))
+      .join('\r\n');
+  }
+
+  function refreshRetryCsvButton() {
+    const btn = $('#btnExportRetryCsv');
+    if (!btn) return;
+    const count = retryCsvRows().length;
+    const show = Boolean(state.session && !state.session.dryRun && count > 0);
+    btn.classList.toggle('hidden', !show);
+    btn.textContent = count > 0 ? `Export retry CSV (${count})` : 'Export retry CSV';
   }
 
   $('#btnExportHtml').addEventListener('click', () => {
@@ -1431,12 +1516,27 @@
     if (!state.session) return toast('No session to export.');
     REPORT.download(`auto-mate-report-${stamp()}.json`, REPORT.toJSON(state.session), 'application/json');
   });
+  $('#btnExportRetryCsv').addEventListener('click', () => {
+    if (!state.session) return toast('No session to export.');
+    if (state.session.dryRun) return toast('Retry CSV is available after a live run.');
+    const rows = retryCsvRows();
+    if (!rows.length) return toast('No unsubmitted rows to export.');
+    REPORT.download(`auto-mate-retry-${stamp()}.csv`, toOriginalCsv(rows), 'text/csv');
+  });
 
   $('#btnExportSession').addEventListener('click', () => {
     if (!state.diagEvents.length) {
       return toast('Nothing captured yet — fill the form during Learn first.');
     }
     REPORT.download(`auto-mate-session-${stamp()}.json`, buildSessionLog(), 'application/json');
+  });
+
+  $('#btnOpenDebugLog').addEventListener('click', async () => {
+    try {
+      await chrome.runtime.sendMessage({ type: MSG.OPEN_DEBUG_LOG });
+    } catch (_) {
+      toast('Could not open debug log window.');
+    }
   });
 
   function stamp() {

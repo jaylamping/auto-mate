@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>auto-mate debug log</title>
+    <link rel="stylesheet" href="debug.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>auto-mate debug log</h1>
+        <p id="summary">Loading…</p>
+      </div>
+      <div class="actions">
+        <button type="button" id="btnCopy">Copy JSON</button>
+        <button type="button" id="btnDownload">Download JSON</button>
+        <button type="button" id="btnClear">Clear</button>
+      </div>
+    </header>
+
+    <main>
+      <pre id="log"></pre>
+    </main>
+
+    <script src="../common/messages.js"></script>
+    <script src="debug.js"></script>
+  </body>
+</html>

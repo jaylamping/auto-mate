@@ -12,7 +12,7 @@
   let abortFlag = false;
 
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-  const DEFAULT_TYPE_CHAR_MS = 50;
+  const DEFAULT_TYPE_CHAR_MS = 20;
 
   function abort() {
     abortFlag = true;
@@ -110,6 +110,10 @@
     const str = toMedHubDateString(value);
     dismissDatePicker(el);
     el.focus();
+    // MedHub may prefill today's date. Clear first so typing/replay replaces it
+    // instead of appending or leaving the datepicker's prior state active.
+    setNativeValue(el, '');
+    fireInput(el);
     // Live MedHub uses jQuery UI datepicker; setDate keeps widget state in sync.
     try {
       const win = el.ownerDocument && el.ownerDocument.defaultView;
@@ -119,6 +123,8 @@
           (el.classList && el.classList.contains('hasDatepicker')) ||
           typeof jq(el).data === 'function' && jq(el).data('datepicker');
         if (hasPicker) {
+          setNativeValue(el, '');
+          fireInput(el);
           jq(el).datepicker('setDate', str);
           jq(el).datepicker('hide');
           fireInput(el);
@@ -131,8 +137,6 @@
     if (charDelayMs > 0) {
       await typeChars(el, str, charDelayMs);
     } else {
-      setNativeValue(el, '');
-      fireInput(el);
       setNativeValue(el, str);
       fireInput(el);
       fireKeystrokes(el);
@@ -202,6 +206,32 @@
     if (!qt.length) return 0;
     const hits = qt.filter((w) => t.includes(w)).length;
     return Math.round((hits / qt.length) * 40);
+  }
+
+  const PROCEDURE_SEARCH_ALIASES = new Map(
+    [
+      ['CORONARY ANGIOGRAM', 'Coronary Angiography/Diagnostic Cath'],
+      ['CORONARY ANGIOGRAM/POSSIBLE PTCA - CV', 'Coronary Angiography/Diagnostic Cath'],
+      ['PTCA WITH STENT - CV', 'PTCA Stent'],
+      ['PTCA - CV', 'PTCA Stent'],
+      ['TRANSVENOUS PACEMAKER - CV', 'Pacemaker - Temporary'],
+      ['IABP INSERTION - CV', 'IABP'],
+      ['LEFT HEART CATH - CV', 'Left Heart Cath'],
+      ['RIGHT HEART CATH - CV', 'Right Heart Cath'],
+      ['LOWER EXTREMITY ANGIOGRAM/POSSIBLE PTA - CV', 'Peripheral Angiography'],
+      ['AORTA BIFEMORAL ANGIOGRAM/POSSIBLE PTA/POSSIBLE STENT - CV', 'Peripheral Angiography'],
+      ['ABDOMINAL AORTIC ANGIOGRAM/POSSIBLE PTA/POSSIBLE STENT - CV', 'Peripheral Angiography'],
+      ['PERICARDIOCENTESIS - CV', 'Pericardiocentesis'],
+      ['PATENT FORAMEN OVALE CLOSURE - CV', 'Atrial septal defect closure'],
+      ['ABLATION ATRIAL FIB - CV', 'Ablation'],
+      ['ABLATION PREMATURE VENTRICULAR CONTRACTION - CV', 'Ablation'],
+      ['PPM LEADLESS SINGLE IMPLANT - CV', 'Pacemaker Permanent']
+    ].map(([from, to]) => [normalizeMatchKey(from), to])
+  );
+
+  function procedureSearchQuery(value) {
+    const raw = String(value == null ? '' : value).trim();
+    return PROCEDURE_SEARCH_ALIASES.get(normalizeMatchKey(raw)) || raw;
   }
 
   /** Canonical option label — avoids scoring "+ CPT noise" in MedHub procedure rows. */
@@ -309,6 +339,45 @@
     return stripMd(a) === stripMd(b);
   }
 
+  function stripSupervisorContext(label) {
+    return String(label || '').replace(/\s*\(.*/, '').trim();
+  }
+
+  function supervisorNameParts(value) {
+    const base = stripSupervisorContext(value);
+    const parts = base.split(',');
+    if (parts.length < 2) return null;
+    const rawLast = parts[0].trim().split(/\s+/)[0] || '';
+    const rawFirst = parts[1].trim().split(/\s+/)[0] || '';
+    const last = normalizeMatchKey(rawLast);
+    const first = normalizeMatchKey(rawFirst);
+    if (!last || !first) return null;
+    return { rawLast, rawFirst, last, first, key: `${last}${first}` };
+  }
+
+  function supervisorResultMatches(label, query) {
+    const a = normalizeMatchKey(label);
+    const b = normalizeMatchKey(query);
+    if (!a || !b) return false;
+    const withoutParen = normalizeMatchKey(stripSupervisorContext(label));
+    const labelParts = supervisorNameParts(label);
+    const queryParts = supervisorNameParts(query);
+    return (
+      supervisorNamesMatch(label, query) ||
+      a.startsWith(b) ||
+      b.startsWith(withoutParen) ||
+      (labelParts && queryParts && labelParts.key === queryParts.key)
+    );
+  }
+
+  function supervisorSearchPlan(query) {
+    const raw = String(query == null ? '' : query).trim();
+    const parts = supervisorNameParts(raw);
+    if (!parts) return { search: raw };
+    const search = /['’]/.test(parts.rawLast) ? parts.rawFirst : parts.rawLast;
+    return { search };
+  }
+
   function findSupervisorListSelect() {
     const byId = document.getElementById('supSelect');
     if (byId && DOM.isVisible(byId)) return byId;
@@ -350,15 +419,32 @@
   function findSupervisorSearchTab() {
     const byId = document.getElementById('supTabSearch') || document.getElementById('supervisor_tab_2');
     if (byId) return byId;
-    // Live MedHub: tab links call procedures_supervisor_tab('search', ...).
-    const byHandler = document.querySelector('[onclick*="procedures_supervisor_tab(\'search\'"]');
-    if (byHandler) return byHandler;
-    const tabs = document.querySelector('.sup-tabs, .mhSubTabs');
-    if (!tabs) return null;
-    for (const link of tabs.querySelectorAll('a, button, [role="tab"]')) {
-      if (normalizeMatchKey(link.textContent) === 'search') return link;
+    for (const link of document.querySelectorAll('a, button, [role="tab"]')) {
+      const text = normalizeMatchKey(link.textContent || link.getAttribute('aria-label') || '');
+      const onclick = String(link.getAttribute('onclick') || '').toLowerCase();
+      const href = String(link.getAttribute('href') || '').toLowerCase();
+      if (text === 'search' && link.closest('.sup-tabs, .mhSubTabs, #procedures_supervisor_pane, form')) return link;
+      if ((onclick.includes('supervisor') || href.includes('supervisor')) && (onclick.includes('search') || href.includes('search'))) return link;
     }
     return null;
+  }
+
+  async function openSupervisorSearchTab() {
+    try {
+      const win = document.defaultView || root;
+      if (win && typeof win.procedures_supervisor_tab === 'function') {
+        win.procedures_supervisor_tab('search');
+        await sleep(40);
+        await resetSupervisorSearchInput();
+        return;
+      }
+    } catch (_) {}
+    const searchTab = findSupervisorSearchTab();
+    if (searchTab) {
+      searchTab.click();
+      await waitFor(() => findSupervisorSearchInput() || findSupervisorChangeButton(), { timeout: 1500, interval: 50 });
+      await resetSupervisorSearchInput();
+    }
   }
 
   function elementFieldHay(el) {
@@ -374,6 +460,23 @@
     if ((el.name === 'searchterms' || el.id === 'searchterms') && isInSupervisorPane(el)) return true;
     const method = document.getElementById('supervisor_method');
     return !!(method && method.value === 'search' && el.name === 'searchterms');
+  }
+
+  function isSupervisorSearchInput(el) {
+    if (!el || el.nodeType !== 1) return false;
+    const explicit =
+      el.name === 'searchterms' ||
+      el.id === 'searchterms' ||
+      el.name === 'supervisor_search' ||
+      el.id === 'supSearch' ||
+      el.id === 'sup_search' ||
+      el.id === 'supervisor_search';
+    const hay = `${elementFieldHay(el)} ${el.getAttribute('placeholder') || ''}`.toLowerCase();
+    const nameSearch = isInSupervisorPane(el) && /name/.test(hay) && /search/.test(hay);
+    if (!explicit && !nameSearch) {
+      return false;
+    }
+    return nameSearch || isInSupervisorPane(el) || el.name === 'supervisor_search' || el.id === 'supSearch' || el.id === 'sup_search' || el.id === 'supervisor_search';
   }
 
   function isInSupervisorPane(el) {
@@ -407,12 +510,36 @@
       document.getElementById('supervisor_search') ||
       document.getElementById('searchterms') ||
       document.querySelector('input[name="supervisor_search"], input[name="searchterms"]');
-    if (byId && isTextEntry(byId) && byId.name !== 'procedures_searchterms') return byId;
+    if (byId && isTextEntry(byId) && isSupervisorSearchInput(byId)) return byId;
     const nodes = document.querySelectorAll('input[type="text"], input[type="search"], input:not([type])');
     for (const el of nodes) {
-      if (isTextEntry(el) && isSupervisorLikeElement(el)) return el;
+      if (isTextEntry(el) && isSupervisorSearchInput(el)) return el;
     }
     return null;
+  }
+
+  function findSupervisorChangeButton() {
+    const scope = document.getElementById('procedures_supervisor_pane') || document;
+    for (const el of scope.querySelectorAll('a, button, input[type="button"], input[type="submit"]')) {
+      if (!DOM.isVisible(el)) continue;
+      const text = normalizeMatchKey(el.textContent || el.value || el.getAttribute('aria-label') || '');
+      const href = String(el.getAttribute('href') || '').toLowerCase();
+      const onclick = String(el.getAttribute('onclick') || '').toLowerCase();
+      if (text === 'change' || ((href.includes('supervisor') || onclick.includes('supervisor')) && (href.includes('change') || onclick.includes('change')))) {
+        return el;
+      }
+    }
+    return null;
+  }
+
+  async function resetSupervisorSearchInput() {
+    const input = findSupervisorSearchInput();
+    if (input) return input;
+    const change = findSupervisorChangeButton();
+    if (!change) return null;
+    change.click();
+    await sleep(80);
+    return waitFor(() => findSupervisorSearchInput(), { timeout: 2000, interval: 50 });
   }
 
   // ---- Procedure search input ----------------------------------------------
@@ -522,16 +649,13 @@
 
   async function selectSupervisorFromSearch(inputEl, optionSelector, query, opts = {}) {
     if (!inputEl || !DOM.isVisible(inputEl)) {
-      const searchTab = findSupervisorSearchTab();
-      if (searchTab) {
-        searchTab.click();
-        await sleep(40);
-      }
-      inputEl = findSupervisorSearchInput() || inputEl;
+      await openSupervisorSearchTab();
+      inputEl = await resetSupervisorSearchInput();
     }
     if (!inputEl) throw new Error('Supervisor search input not found');
 
-    const q = String(query).trim();
+    const plan = supervisorSearchPlan(query);
+    const q = plan.search;
     if (!q) throw new Error('Empty supervisor value');
 
     const timeout = opts.autocompleteTimeoutMs != null ? opts.autocompleteTimeoutMs : 9000;
@@ -564,7 +688,7 @@
 
       if (visible.length === 1) {
         const chosen = extractOptionLabel(visible[0]);
-        if (!supervisorNamesMatch(chosen, query)) {
+        if (!supervisorResultMatches(chosen, query)) {
           if (len < q.length) {
             if (charDelayMs > 0) await sleep(charDelayMs);
             continue;
@@ -573,7 +697,7 @@
         }
         visible[0].click();
         await sleep(50);
-        return chosen;
+        return stripSupervisorContext(chosen) || chosen;
       }
       if (visible.length === 0 && len < q.length) {
         if (charDelayMs > 0) await sleep(charDelayMs);
@@ -587,12 +711,12 @@
       if (visible.length === 0) {
         throw new Error(`No autocomplete results for "${query}"`);
       }
-      const exact = visible.find((o) => supervisorNamesMatch(extractOptionLabel(o), query));
+      const exact = visible.find((o) => supervisorResultMatches(extractOptionLabel(o), query));
       if (exact) {
         const chosen = extractOptionLabel(exact);
         exact.click();
         await sleep(50);
-        return chosen;
+        return stripSupervisorContext(chosen) || chosen;
       }
       throw new Error(`Multiple supervisor matches for "${query}" (${visible.length} results)`);
     }
@@ -601,11 +725,6 @@
   }
 
   async function selectSupervisor(query, step, opts = {}) {
-    // Recorded via the free-text "Other" tab → replay that directly.
-    if (stepUsesSupervisorOther(step)) {
-      return selectSupervisorFromOther(query, opts);
-    }
-
     const listSelect = findSupervisorListSelect();
     if (listSelect) {
       const fromList = trySelectSupervisorFromList(listSelect, query);
@@ -613,28 +732,26 @@
     }
 
     let inputEl = findSupervisorSearchInput();
-    if (!inputEl) inputEl = DOM.resolveElement(step.candidates);
     if (!inputEl) {
-      const searchTab = findSupervisorSearchTab();
-      if (searchTab) {
-        searchTab.click();
-        await sleep(40);
-      }
-      inputEl = findSupervisorSearchInput() || DOM.resolveElement(step.candidates);
+      const resolved = DOM.resolveElement(step.candidates);
+      if (resolved && isSupervisorSearchInput(resolved)) inputEl = resolved;
     }
-    // No List match and no Search input — fall back to the free-text Other tab.
     if (!inputEl) {
-      return selectSupervisorFromOther(query, opts);
+      await openSupervisorSearchTab();
+      inputEl = await waitFor(() => {
+        const found = findSupervisorSearchInput();
+        if (found) return found;
+        const resolved = DOM.resolveElement(step.candidates);
+        return resolved && isSupervisorSearchInput(resolved) ? resolved : null;
+      }, { timeout: 3000, interval: 80 });
+    }
+    if (!inputEl) inputEl = await resetSupervisorSearchInput();
+    if (!inputEl) {
+      const tab = findSupervisorSearchTab();
+      throw new Error(`Supervisor search input not found for "${query}"${tab ? ' after opening Search tab' : ' (Search tab not found)'}`);
     }
 
-    try {
-      return await selectSupervisorFromSearch(inputEl, step.optionSelector, query, opts);
-    } catch (searchErr) {
-      // The name isn't in the List/Search results — Other free text always works.
-      const other = await selectSupervisorFromOther(query, opts).catch(() => null);
-      if (other) return other;
-      throw searchErr;
-    }
+    return selectSupervisorFromSearch(inputEl, step.optionSelector, query, opts);
   }
 
   function isSkippableSupervisorNavClick(step) {
@@ -767,11 +884,18 @@
   function isProcedureRemoveControl(el) {
     if (!el || el.nodeType !== 1) return false;
     const tag = el.tagName.toLowerCase();
-    if (tag !== 'a' && tag !== 'button' && el.getAttribute('role') !== 'button') return false;
-    const hay = `${el.className || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''}`.toLowerCase();
+    const type = String(el.getAttribute('type') || '').toLowerCase();
+    if (tag !== 'a' && tag !== 'button' && el.getAttribute('role') !== 'button' && !(tag === 'input' && ['button', 'submit', 'image'].includes(type))) return false;
+    const hay = `${el.className || ''} ${el.getAttribute('aria-label') || ''} ${el.getAttribute('title') || ''} ${el.value || ''}`.toLowerCase();
     if (/\bremove\b|\bdelete\b|\bunspec/.test(hay)) return true;
     const txt = (el.textContent || '').trim();
-    return txt === '×' || txt === '✕' || txt === 'X' || txt === 'x';
+    return /\bdelete\b/i.test(txt) || txt === '×' || txt === '✕' || txt === 'X' || txt === 'x';
+  }
+
+  function isSelectedProcedureTable(table) {
+    if (!table || table.nodeType !== 1) return false;
+    const text = normalizeMatchKey(table.textContent || '');
+    return text.includes('procedure') && text.includes('actions') && text.includes('role') && table.querySelector('select');
   }
 
   function findSelectedProcedureRows() {
@@ -796,6 +920,15 @@
           rows.push(row);
         }
       } catch (_) {}
+    }
+    for (const table of document.querySelectorAll('table')) {
+      if (!isSelectedProcedureTable(table)) continue;
+      for (const row of table.querySelectorAll('tr')) {
+        if (!DOM.isVisible(row) || row.id === 'prow_0' || seen.has(row)) continue;
+        if (!findProcedureRemoveControl(row)) continue;
+        seen.add(row);
+        rows.push(row);
+      }
     }
     return rows;
   }
@@ -983,8 +1116,7 @@
               detail: 'Wrong target for Supervisor'
             });
           } else if (step.field === FIELD.SUPERVISOR && isSupervisorOtherElement(el)) {
-            // Free-text "Other" supervisor: ensure the tab is open, then type.
-            const chosen = await selectSupervisorFromOther(v, acOpts);
+            const chosen = await selectSupervisor(v, step, acOpts);
             record({ field: step.field, role: step.role, value: v, chosen, outcome: 'success' });
           } else if (el.tagName.toLowerCase() === 'select') {
             setSelectByQuery(el, v);
@@ -1019,10 +1151,20 @@
                 return { ok: false, actions, failedField: step.field };
               }
               try {
-                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, proc, { ...acOpts, clickRel: step.clickRel });
-                record({ field: step.field, role: step.role, value: proc, chosen, outcome: 'success' });
+                const searchValue = procedureSearchQuery(proc);
+                const chosen = await selectFromAutocomplete(inputEl, step.optionSelector, searchValue, { ...acOpts, clickRel: step.clickRel });
+                record({
+                  field: step.field,
+                  role: step.role,
+                  value: proc,
+                  chosen,
+                  outcome: 'success',
+                  detail: searchValue !== proc ? `searched "${searchValue}"` : ''
+                });
               } catch (err) {
-                record({ field: step.field, role: step.role, value: proc, outcome: 'failed', detail: err.message });
+                const searchValue = procedureSearchQuery(proc);
+                const detail = searchValue !== proc ? `${err.message}; searched "${searchValue}"` : err.message;
+                record({ field: step.field, role: step.role, value: proc, outcome: 'failed', detail });
                 return { ok: false, actions, failedField: step.field };
               }
               await sleep(fieldDelayMs);

@@ -79,6 +79,7 @@
         </div>
 
         <div id="diagExportWrap" class="hidden flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <button type="button" id="btnOpenDebugLog" class="btn-outline btn-sm">Open live log</button>
           <button type="button" id="btnExportSession" class="btn-outline btn-sm">Export session log</button>
           <span>Captured <span id="diagCount">0</span> interactions &mdash; send this to the auto-mate team to verify every field maps correctly.</span>
         </div>
@@ -127,6 +128,7 @@
           <button type="button" id="btnExportHtml" class="btn-export-html">Export HTML</button>
           <button type="button" id="btnExportCsv" class="btn-outline btn-sm">Export CSV</button>
           <button type="button" id="btnExportJson" class="btn-outline btn-sm">Export JSON</button>
+          <button type="button" id="btnExportRetryCsv" class="btn-outline btn-sm hidden">Export retry CSV</button>
         </div>
         <div id="reportPreview" class="report-preview" tabindex="0" aria-label="Session report preview">
           <div id="reportBody" class="report-body"></div>

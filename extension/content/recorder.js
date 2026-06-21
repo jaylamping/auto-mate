@@ -9,7 +9,7 @@
  */
 (function (root) {
   const DOM = root.FAA_DOM;
-  const { ROLE, minMappingLenFromHaystack, autoGuessField } = root.FAA_MSG;
+  const { ROLE, FIELD, minMappingLenFromHaystack, autoGuessField } = root.FAA_MSG;
 
   let active = false;
   let onStep = null;
@@ -370,14 +370,21 @@
   function emitLiveFieldState(el, opts = {}) {
     if (!onLiveInput || !el || el.nodeType !== 1) return;
     if (!wasFieldInteracted(el)) return;
-    if (opts.blurred && !valueChangedSinceFocus(el)) return;
+    const candidates = DOM.generateCandidateSelectors(el);
+    const guessedField = autoGuessField({
+      role: ROLE.INPUT,
+      candidates,
+      text: mappedFieldText(el),
+      sampleValue: fieldValue(el)
+    });
+    if (opts.blurred && !valueChangedSinceFocus(el) && guessedField !== FIELD.DATE) return;
     const tag = el.tagName.toLowerCase();
     const value = fieldValue(el);
     const minLen = tag === 'select' ? 1 : minLiveValueLen(el);
     if (value.length < minLen) return;
     onLiveInput({
       role: ROLE.INPUT,
-      candidates: DOM.generateCandidateSelectors(el),
+      candidates,
       sampleValue: value,
       text: mappedFieldText(el),
       tag,
@@ -674,6 +681,10 @@
       emitProcedureAddStep(el);
       pendingType = null;
       return;
+    }
+
+    if (isTextEntry(el) || el.tagName.toLowerCase() === 'select') {
+      markFieldInteracted(el);
     }
 
     if (isSupervisorResultClick(el)) {

@@ -166,6 +166,25 @@ module.exports = async function run() {
     console.log('  recorder.medhub-live: procedure_date change records as Procedure Date.');
   }
 
+  // Prefilled procedure_date still emits for Mapping when the user tabs through
+  // it without changing the default value.
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const live = [];
+    page.RECORDER.start(null, (step) => live.push(step));
+    const date = page.document.querySelector('input[name="procedure_date"]');
+    date.focus();
+    clickEl(page.window, date);
+    date.dispatchEvent(new page.window.FocusEvent('blur', { bubbles: true }));
+    page.RECORDER.stop();
+    const dateLive = live.find(
+      (s) => s.blurred && (s.candidates || []).some((c) => /procedure_date/.test(c.value))
+    );
+    assert.ok(dateLive, 'prefilled date blur emits live mapping state');
+    assert.strictEqual(dateLive.text, 'Procedure Date', 'prefilled date labeled for mapping');
+    console.log('  recorder.medhub-live: prefilled procedure_date blur maps Procedure Date.');
+  }
+
   // ---- Supervisor Search tab: generic input[name="searchterms"] ----
   {
     const page = createPage('medhub-procedure-log-live.html');

@@ -133,7 +133,7 @@
    * One spreadsheet row = one engine row. Delimited procedure cells still split.
    */
   function buildEngineRows(parsed, mapping, opts = {}) {
-    const { procedureDelimiter = /[;,|\/]+|\n/, location = 'IMC' } = opts;
+    const { procedureDelimiter = /[;,|]+|\n/, location = 'IMC' } = opts;
     const dateCol = mapping.date;
     const supCol = mapping.supervisor;
     const encounterCol = mapping.encounter || mapping.mrn;

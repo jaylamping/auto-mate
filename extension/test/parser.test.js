@@ -181,6 +181,27 @@ async function run() {
   const last = rows[3];
   assert.deepStrictEqual(last.procedures, ['Colonoscopy', 'Biopsy']);
 
+  const slashRows = PARSER.buildEngineRows(
+    {
+      headers: parsed.headers,
+      rows: [
+        {
+          'Date of Service': '2026-01-05',
+          'Attending Provider': 'Smith, John',
+          'Patient MRN': '123',
+          'Procedure Name': 'CORONARY ANGIOGRAM/POSSIBLE PTCA - CV'
+        }
+      ]
+    },
+    mapping,
+    { location: 'IMC' }
+  );
+  assert.deepStrictEqual(
+    slashRows[0].procedures,
+    ['CORONARY ANGIOGRAM/POSSIBLE PTCA - CV'],
+    'slash inside a procedure name should not split into a second procedure'
+  );
+
   // --- Report builder ---
   const session = {
     startedAt: new Date().toISOString(),

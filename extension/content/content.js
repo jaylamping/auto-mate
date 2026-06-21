@@ -15,17 +15,24 @@
   root.__FAA_CONTENT_OWNER__ = true;
 
   const { MSG, BUILD_ID } = root.FAA_MSG;
-  const RECORDER = root.FAA_RECORDER;
-  const ENGINE = root.FAA_ENGINE;
-  const OVERLAY = root.FAA_OVERLAY;
-  const DOM = root.FAA_DOM;
+  const recorder = () => root.FAA_RECORDER;
+  const engine = () => root.FAA_ENGINE;
+  const overlay = () => root.FAA_OVERLAY;
+  const domUtils = () => root.FAA_DOM;
+
+  function sendRuntimeMessage(message) {
+    try {
+      const maybePromise = chrome.runtime.sendMessage(message);
+      if (maybePromise && typeof maybePromise.catch === 'function') maybePromise.catch(() => {});
+    } catch (_) {}
+  }
 
   function toPanel(type, payload) {
-    chrome.runtime.sendMessage({ type, payload }).catch(() => {});
+    sendRuntimeMessage({ type, payload });
   }
 
   function fieldText(el) {
-    const dom = root.FAA_DOM;
+    const dom = domUtils();
     if (dom && typeof dom.accessibleNameFor === 'function') {
       return (dom.accessibleNameFor(el) || '').trim();
     }
@@ -55,10 +62,10 @@
     const seen = new Set();
     const nodes = document.querySelectorAll('input, textarea, select, [contenteditable="true"]');
     for (const el of nodes) {
-      if (!DOM.isVisible(el)) continue;
+      if (!domUtils().isVisible(el)) continue;
       const tag = el.tagName.toLowerCase();
       if (tag === 'input' && !isTextEntry(el)) continue;
-      const candidates = DOM.generateCandidateSelectors(el);
+      const candidates = domUtils().generateCandidateSelectors(el);
       const sig = candidates[0] ? `${candidates[0].type}::${candidates[0].value}` : el.id || fieldText(el);
       if (!sig || seen.has(sig)) continue;
       seen.add(sig);
@@ -82,7 +89,7 @@
         return true;
 
       case MSG.START_LEARN:
-        RECORDER.start(
+        recorder().start(
           (step) => toPanel(MSG.STEP_RECORDED, step),
           (live) => toPanel(MSG.FIELD_INPUT, live),
           (diag) => toPanel(MSG.DIAG_EVENT, diag)
@@ -91,16 +98,16 @@
         return true;
 
       case MSG.STOP_LEARN:
-        RECORDER.stop();
+        recorder().stop();
         toPanel(MSG.LEARN_DONE, {});
         sendResponse({ ok: true });
         return true;
 
       case MSG.HIGHLIGHT_FIELD: {
-        const el = DOM.resolveElement(message.payload && message.payload.candidates);
+        const el = domUtils().resolveElement(message.payload && message.payload.candidates);
         if (el) {
-          OVERLAY.highlight(el);
-          setTimeout(() => OVERLAY.clearHighlight(), 1600);
+          overlay().highlight(el);
+          setTimeout(() => overlay().clearHighlight(), 1600);
         }
         sendResponse({ ok: !!el });
         return true;
@@ -113,13 +120,13 @@
       }
 
       case MSG.CLEAR_OVERLAY:
-        OVERLAY.hideBadge();
+        overlay().hideBadge();
         sendResponse({ ok: true });
         return true;
 
       case MSG.RUN_ROW: {
         const { recipe, row, index, total, dryRun, fieldDelayMs } = message.payload;
-        ENGINE.runRow(recipe, row, {
+        engine().runRow(recipe, row, {
           dryRun,
           fieldDelayMs,
           index,
@@ -127,7 +134,7 @@
           onAction: (entry) => toPanel(MSG.ACTION_LOG, { index, entry })
         })
           .then((result) => {
-            OVERLAY.hideBadge();
+            overlay().hideBadge();
             toPanel(MSG.ROW_DONE, { index, total, result, mrn: row.mrn });
           })
           .catch((err) => {
@@ -138,9 +145,9 @@
       }
 
       case MSG.STOP_RUN:
-        ENGINE.abort();
-        OVERLAY.setBadge('<b>auto-mate</b><br>Stopping after current action...');
-        setTimeout(() => OVERLAY.hideBadge(), 1500);
+        engine().abort();
+        overlay().setBadge('<b>auto-mate</b><br>Stopping after current action...');
+        setTimeout(() => overlay().hideBadge(), 1500);
         sendResponse({ ok: true });
         return true;
 
