@@ -31,6 +31,28 @@
     sendRuntimeMessage({ type, payload });
   }
 
+  function emitDebug(kind, data = {}) {
+    toPanel(MSG.DEBUG_EVENT, {
+      kind,
+      source: 'content',
+      url: location.href,
+      visibilityState: document.visibilityState,
+      ...data
+    });
+  }
+
+  function attachLifecycleDebug() {
+    window.addEventListener('beforeunload', () => {
+      emitDebug('page:beforeunload');
+    });
+    window.addEventListener('pagehide', (event) => {
+      emitDebug('page:pagehide', { persisted: Boolean(event.persisted) });
+    });
+    document.addEventListener('visibilitychange', () => {
+      emitDebug('page:visibilitychange');
+    });
+  }
+
   function fieldText(el) {
     const dom = domUtils();
     if (dom && typeof dom.accessibleNameFor === 'function') {
@@ -155,4 +177,6 @@
         return false;
     }
   });
+
+  attachLifecycleDebug();
 })(typeof window !== 'undefined' ? window : globalThis);

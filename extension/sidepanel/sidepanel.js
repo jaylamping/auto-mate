@@ -1019,6 +1019,15 @@
       field: FIELD.ENCOUNTER,
       role: ROLE.INPUT,
       candidates: [{ type: 'css', value: 'input[name="patientID_other"]' }]
+    },
+    [FIELD.SUBMIT]: {
+      field: FIELD.SUBMIT,
+      role: ROLE.SUBMIT,
+      candidates: [
+        { type: 'css', value: '#procedure_submit' },
+        { type: 'css', value: 'input[type="submit"][name="submit"][value="Log Procedure"]' },
+        { type: 'css', value: '#procedureform input[type="submit"]' }
+      ]
     }
   };
 
@@ -1042,12 +1051,16 @@
       const canonical = CANONICAL_RECIPE_STEPS[key];
       if (canonical) toAdd.push({ ...canonical });
     }
+    if (!fieldsPresent.has(FIELD.SUBMIT)) {
+      toAdd.push({ ...CANONICAL_RECIPE_STEPS[FIELD.SUBMIT] });
+    }
 
     let merged = steps;
     if (toAdd.length) {
       const dateSteps = toAdd.filter((s) => s.field === FIELD.DATE);
-      const otherSteps = toAdd.filter((s) => s.field !== FIELD.DATE);
-      merged = dedupeRecipeSteps([...dateSteps, ...otherSteps, ...steps]);
+      const submitSteps = toAdd.filter((s) => s.field === FIELD.SUBMIT);
+      const otherSteps = toAdd.filter((s) => s.field !== FIELD.DATE && s.field !== FIELD.SUBMIT);
+      merged = dedupeRecipeSteps([...dateSteps, ...otherSteps, ...steps, ...submitSteps]);
     }
     for (const step of merged) {
       if (step.field === FIELD.PROCEDURE && step.role === ROLE.AUTOCOMPLETE) {
@@ -1416,6 +1429,13 @@
         settled = true;
         clearTimeout(timer);
         state.rowResolver = null;
+        sendDebugEvent('run:row-wait:resolved', {
+          index,
+          total,
+          mrn: row.mrn || '',
+          ok: Boolean(payload?.result?.ok),
+          failedField: payload?.result?.failedField || ''
+        });
         resolve(payload);
       };
 
@@ -1423,12 +1443,26 @@
 
       const timer = setTimeout(async () => {
         logLine(`Row ${index + 1} timed out after ${ROW_TIMEOUT_MS / 1000}s.`, 'failed');
+        sendDebugEvent('run:row-wait:timeout', {
+          index,
+          total,
+          mrn: row.mrn || '',
+          dryRun,
+          timeoutMs: ROW_TIMEOUT_MS
+        });
         try {
           await sendToTab(MSG.STOP_RUN);
         } catch (_) {}
         finish({ index, result: { ok: false, actions: [], failedField: 'timeout' } });
       }, ROW_TIMEOUT_MS);
 
+      sendDebugEvent('run:row-wait:start', {
+        index,
+        total,
+        mrn: row.mrn || '',
+        dryRun,
+        timeoutMs: ROW_TIMEOUT_MS
+      });
       sendToTab(MSG.RUN_ROW, {
         recipe: ensureRecipeSteps(state.recipe),
         row,
@@ -1437,6 +1471,12 @@
         dryRun,
         fieldDelayMs
       }).catch(() => {
+        sendDebugEvent('run:row-send:failed', {
+          index,
+          total,
+          mrn: row.mrn || '',
+          dryRun
+        });
         finish({ index, result: { ok: false, actions: [], failedField: 'page' } });
       });
     });

@@ -1233,6 +1233,18 @@
     } catch (_) {}
   }
 
+  function emitRunDebug(kind, data = {}) {
+    try {
+      if (typeof chrome === 'undefined' || !chrome.runtime || !chrome.runtime.sendMessage) return;
+      chrome.runtime
+        .sendMessage({
+          type: MSG.DEBUG_EVENT,
+          payload: { kind, source: 'engine', url: location.href, ...data }
+        })
+        .catch(() => {});
+    } catch (_) {}
+  }
+
   function clearProceduresInPageContext() {
     runInPageContext(`
       (function () {
@@ -1429,10 +1441,69 @@
     return null;
   }
 
-  async function ensureLogAnotherProcedure(fieldDelayMs = 100) {
+  function elementSnapshot(el) {
+    if (!el) return null;
+    let visible = false;
+    try {
+      visible = DOM.isVisible(el);
+    } catch (_) {}
+    return {
+      tag: el.tagName ? el.tagName.toLowerCase() : '',
+      id: el.id || '',
+      name: el.getAttribute('name') || '',
+      type: el.getAttribute('type') || '',
+      text: (el.textContent || el.value || el.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 120),
+      disabled: Boolean(el.disabled),
+      visible
+    };
+  }
+
+  function checkboxLabelText(cb) {
+    if (!cb) return '';
+    const label =
+      cb.closest('label') ||
+      (cb.id ? document.querySelector(`label[for="${CSS.escape(cb.id)}"]`) : null);
+    return (label ? label.textContent : cb.getAttribute('aria-label') || '').replace(/\s+/g, ' ').trim().slice(0, 120);
+  }
+
+  function findLogProcedureSubmit() {
+    const selectors = [
+      '#procedure_submit',
+      'input[type="submit"][name="submit"][value="Log Procedure"]',
+      '#procedureform input[type="submit"]'
+    ];
+    for (const sel of selectors) {
+      const el = document.querySelector(sel);
+      if (el && DOM.isVisible(el)) return el;
+    }
+    for (const el of document.querySelectorAll('input[type="submit"], button[type="submit"], button, input[type="button"]')) {
+      if (!DOM.isVisible(el)) continue;
+      const text = String(el.value || el.textContent || el.getAttribute('aria-label') || '').trim();
+      if (/^log\s+procedure$/i.test(text)) return el;
+    }
+    return null;
+  }
+
+  async function ensureLogAnotherProcedure(fieldDelayMs = 100, context = {}) {
     const cb = findLogAnotherCheckbox();
+    emitRunDebug('run:log-another:before', {
+      ...context,
+      found: Boolean(cb),
+      checkbox: elementSnapshot(cb),
+      label: checkboxLabelText(cb),
+      checked: cb ? Boolean(cb.checked) : false
+    });
     if (!cb) return { found: false, checked: false };
-    if (cb.checked) return { found: true, checked: true, already: true };
+    if (cb.checked) {
+      emitRunDebug('run:log-another:after', {
+        ...context,
+        found: true,
+        checked: true,
+        already: true,
+        clicked: false
+      });
+      return { found: true, checked: true, already: true };
+    }
     cb.click();
     if (!cb.checked) {
       cb.checked = true;
@@ -1440,7 +1511,41 @@
       cb.dispatchEvent(new Event('input', { bubbles: true }));
     }
     await sleep(Math.min(fieldDelayMs, 150));
+    emitRunDebug('run:log-another:after', {
+      ...context,
+      found: true,
+      checked: Boolean(cb.checked),
+      already: false,
+      clicked: true
+    });
     return { found: true, checked: cb.checked, already: false };
+  }
+
+  async function resetLogAnotherProcedure(fieldDelayMs = 100, context = {}) {
+    const cb = findLogAnotherCheckbox();
+    emitRunDebug('run:log-another:reset-before', {
+      ...context,
+      found: Boolean(cb),
+      checkbox: elementSnapshot(cb),
+      label: checkboxLabelText(cb),
+      checked: cb ? Boolean(cb.checked) : false
+    });
+    if (!cb) return { found: false, checked: false };
+    if (cb.checked) {
+      cb.click();
+      if (cb.checked) {
+        cb.checked = false;
+        cb.dispatchEvent(new Event('change', { bubbles: true }));
+        cb.dispatchEvent(new Event('input', { bubbles: true }));
+      }
+    }
+    await sleep(Math.min(fieldDelayMs, 150));
+    emitRunDebug('run:log-another:reset-after', {
+      ...context,
+      found: true,
+      checked: Boolean(cb.checked)
+    });
+    return { found: true, checked: cb.checked };
   }
 
   function hasMoreRowsAfter(index, total) {
@@ -1470,6 +1575,7 @@
       typeCharDelayMs: typeCharDelayMs != null ? typeCharDelayMs : DEFAULT_TYPE_CHAR_MS
     };
     const actions = [];
+    let submitStepExecuted = false;
 
     const record = (entry) => {
       const full = { ts: new Date().toISOString(), mrn: row.mrn, ...entry };
@@ -1492,7 +1598,12 @@
       });
     }
 
-    for (const step of recipe.steps) {
+    const orderedSteps = [
+      ...recipe.steps.filter((step) => step.role !== ROLE.SUBMIT),
+      ...recipe.steps.filter((step) => step.role === ROLE.SUBMIT)
+    ];
+
+    for (const step of orderedSteps) {
       if (abortFlag) {
         record({ field: step.field, role: step.role, outcome: 'aborted', detail: 'Stopped by user' });
         return { ok: false, actions, aborted: true };
@@ -1648,7 +1759,51 @@
             }
           }
         } else if (step.role === ROLE.SUBMIT) {
+          submitStepExecuted = true;
           if (dryRun) {
+            if (hasMoreRowsAfter(index, total)) {
+              const dryRunContext = {
+                index,
+                total,
+                mrn: row.mrn || '',
+                hasMoreRows: true,
+                dryRun: true
+              };
+              const logAnother = await ensureLogAnotherProcedure(fieldDelayMs, dryRunContext);
+              if (!logAnother.found) {
+                record({
+                  field: FIELD.CLICK,
+                  role: ROLE.CLICK,
+                  outcome: 'skipped',
+                  detail: 'Log Another Procedure checkbox not found during dry run'
+                });
+              } else if (!logAnother.checked) {
+                record({
+                  field: FIELD.CLICK,
+                  role: ROLE.CLICK,
+                  outcome: 'failed',
+                  detail: 'Could not check Log Another Procedure during dry run'
+                });
+                return { ok: false, actions, failedField: step.field };
+              } else {
+                record({
+                  field: FIELD.CLICK,
+                  role: ROLE.CLICK,
+                  outcome: 'success',
+                  detail: 'Checked Log Another Procedure for dry-run validation'
+                });
+              }
+              const reset = await resetLogAnotherProcedure(fieldDelayMs, dryRunContext);
+              if (reset.found && reset.checked) {
+                record({
+                  field: FIELD.CLICK,
+                  role: ROLE.CLICK,
+                  outcome: 'failed',
+                  detail: 'Could not reset Log Another Procedure after dry run'
+                });
+                return { ok: false, actions, failedField: step.field };
+              }
+            }
             record({ field: step.field, role: step.role, outcome: 'skipped', detail: 'DRY RUN - not submitted' });
           } else {
             const submitEl = el || DOM.resolveElement(step.candidates);
@@ -1656,8 +1811,14 @@
               record({ field: step.field, role: step.role, outcome: 'failed', detail: 'Submit control not found' });
               return { ok: false, actions, failedField: step.field };
             }
+            const submitContext = {
+              index,
+              total,
+              mrn: row.mrn || '',
+              hasMoreRows: hasMoreRowsAfter(index, total)
+            };
             if (hasMoreRowsAfter(index, total)) {
-              const logAnother = await ensureLogAnotherProcedure(fieldDelayMs);
+              const logAnother = await ensureLogAnotherProcedure(fieldDelayMs, submitContext);
               if (!logAnother.found) {
                 record({
                   field: FIELD.CLICK,
@@ -1684,7 +1845,16 @@
                 });
               }
             }
+            emitRunDebug('run:submit:before-click', {
+              ...submitContext,
+              submit: elementSnapshot(submitEl),
+              logAnotherChecked: Boolean(findLogAnotherCheckbox()?.checked)
+            });
             submitEl.click();
+            emitRunDebug('run:submit:after-click', {
+              ...submitContext,
+              logAnotherChecked: Boolean(findLogAnotherCheckbox()?.checked)
+            });
             record({ field: step.field, role: step.role, outcome: 'success', detail: 'Submitted' });
           }
         }
@@ -1705,6 +1875,71 @@
       }
 
       await sleep(fieldDelayMs);
+    }
+
+    if (!dryRun && !submitStepExecuted) {
+      const submitEl = findLogProcedureSubmit();
+      const submitContext = {
+        index,
+        total,
+        mrn: row.mrn || '',
+        hasMoreRows: hasMoreRowsAfter(index, total),
+        fallback: true
+      };
+      if (!submitEl) {
+        emitRunDebug('run:submit:fallback-missing', submitContext);
+        record({
+          field: FIELD.SUBMIT,
+          role: ROLE.SUBMIT,
+          outcome: 'failed',
+          detail: 'Log Procedure submit control not found'
+        });
+        return { ok: false, actions, failedField: FIELD.SUBMIT };
+      }
+      if (hasMoreRowsAfter(index, total)) {
+        const logAnother = await ensureLogAnotherProcedure(fieldDelayMs, submitContext);
+        if (!logAnother.found) {
+          record({
+            field: FIELD.CLICK,
+            role: ROLE.CLICK,
+            outcome: 'skipped',
+            detail: 'Log Another Procedure checkbox not found'
+          });
+        } else if (!logAnother.checked) {
+          record({
+            field: FIELD.CLICK,
+            role: ROLE.CLICK,
+            outcome: 'failed',
+            detail: 'Could not check Log Another Procedure'
+          });
+          return { ok: false, actions, failedField: FIELD.SUBMIT };
+        } else {
+          record({
+            field: FIELD.CLICK,
+            role: ROLE.CLICK,
+            outcome: 'success',
+            detail: logAnother.already
+              ? 'Log Another Procedure already checked'
+              : 'Checked Log Another Procedure for next row'
+          });
+        }
+      }
+      emitRunDebug('run:submit:before-click', {
+        ...submitContext,
+        submit: elementSnapshot(submitEl),
+        logAnotherChecked: Boolean(findLogAnotherCheckbox()?.checked)
+      });
+      submitEl.click();
+      emitRunDebug('run:submit:after-click', {
+        ...submitContext,
+        logAnotherChecked: Boolean(findLogAnotherCheckbox()?.checked)
+      });
+      record({
+        field: FIELD.SUBMIT,
+        role: ROLE.SUBMIT,
+        outcome: 'success',
+        detail: 'Submitted via Log Procedure fallback'
+      });
     }
 
     return { ok: true, actions };

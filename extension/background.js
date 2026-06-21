@@ -36,6 +36,19 @@ chrome.action.onClicked.addListener(async (tab) => {
   }
 });
 
+chrome.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
+  const url = changeInfo.url || tab?.url || '';
+  if (!url || !/\/procedures[^/]*\.mh/i.test(url)) return;
+  if (!changeInfo.status && !changeInfo.url) return;
+  appendDebugEvent({
+    kind: 'tab:updated',
+    source: 'background',
+    tabId,
+    status: changeInfo.status || '',
+    url
+  }).catch(() => {});
+});
+
 async function appendDebugEvent(event) {
   if (!STORAGE_KEYS.DEBUG_LOG) return;
   const entry = {

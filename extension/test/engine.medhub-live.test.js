@@ -115,6 +115,105 @@ module.exports = async function run() {
     console.log('  engine.medhub-live: live run submitted the procedureform once.');
   }
 
+  // ---- Live run still submits when an older saved recipe is missing submit ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE, MSG } = page;
+    const recipe = {
+      ...buildRecipe(MSG),
+      steps: buildRecipe(MSG).steps.filter((step) => step.role !== MSG.ROLE.SUBMIT)
+    };
+    const result = await ENGINE.runRow(recipe, row, {
+      dryRun: false,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0,
+      index: 0,
+      total: 1
+    });
+    assert.ok(result.ok, 'missing-submit recipe should still submit');
+    assert.strictEqual(document.body.getAttribute('data-submitted'), 'true', 'fallback submitted');
+    assert.strictEqual(document.body.getAttribute('data-submit-count'), '1', 'fallback submitted once');
+    assert.ok(
+      result.actions.some((a) => a.role === MSG.ROLE.SUBMIT && /fallback/i.test(a.detail || '')),
+      'fallback submit action logged'
+    );
+    console.log('  engine.medhub-live: missing submit step falls back to Log Procedure.');
+  }
+
+  // ---- Submit step is forced last even if a repaired/stale recipe has it early ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE, MSG } = page;
+    const base = buildRecipe(MSG);
+    const submitStep = base.steps.find((step) => step.role === MSG.ROLE.SUBMIT);
+    const earlySubmitRecipe = {
+      ...base,
+      steps: [
+        base.steps[0],
+        submitStep,
+        ...base.steps.slice(1).filter((step) => step.role !== MSG.ROLE.SUBMIT)
+      ]
+    };
+    const result = await ENGINE.runRow(earlySubmitRecipe, row, {
+      dryRun: false,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0,
+      index: 0,
+      total: 1
+    });
+    assert.ok(result.ok, 'early submit recipe should still succeed');
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy', 'Biopsy'], 'procedures added before submit');
+    assert.strictEqual(document.body.getAttribute('data-submitted'), 'true', 'submitted after procedures');
+    assert.strictEqual(document.body.getAttribute('data-submit-count'), '1', 'submitted once');
+    console.log('  engine.medhub-live: submit step is forced after procedure selection.');
+  }
+
+  // ---- Missing-submit fallback checks Log Another Procedure for batch rows ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE, MSG } = page;
+    const recipe = {
+      ...buildRecipe(MSG),
+      steps: buildRecipe(MSG).steps.filter((step) => step.role !== MSG.ROLE.SUBMIT)
+    };
+    const logAnother = document.querySelector('input[name="log_another"]');
+    logAnother.checked = false;
+    const result = await ENGINE.runRow(recipe, row, {
+      dryRun: false,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0,
+      index: 0,
+      total: 2
+    });
+    assert.ok(result.ok, 'batch fallback submit should succeed');
+    assert.strictEqual(logAnother.checked, true, 'fallback checks Log Another Procedure');
+    assert.strictEqual(document.body.getAttribute('data-submit-count'), '1', 'fallback submitted once');
+    console.log('  engine.medhub-live: missing submit fallback checks Log Another Procedure.');
+  }
+
+  // ---- Dry run validates Log Another Procedure but resets it before next row ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, ENGINE, MSG } = page;
+    const logAnother = document.querySelector('input[name="log_another"]');
+    logAnother.checked = false;
+    const result = await ENGINE.runRow(buildRecipe(MSG), row, {
+      dryRun: true,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0,
+      index: 0,
+      total: 2
+    });
+    assert.ok(result.ok, 'dry-run batch row should succeed');
+    assert.strictEqual(logAnother.checked, false, 'dry run resets Log Another Procedure');
+    assert.ok(
+      result.actions.some((a) => /dry-run validation/i.test(a.detail || '')),
+      'dry run logs Log Another validation'
+    );
+    assert.notStrictEqual(document.body.getAttribute('data-submitted'), 'true', 'dry run still does not submit');
+    console.log('  engine.medhub-live: dry run checks and resets Log Another Procedure.');
+  }
+
   // ---- Second row clears the prior row's selected procedures (procedures_delete) ----
   {
     const page = createPage('medhub-procedure-log-live.html');
