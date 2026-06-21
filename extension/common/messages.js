@@ -33,7 +33,7 @@
   };
 
   /** Bumped when content scripts change; side panel re-injects if mismatch. */
-  const BUILD_ID = '48';
+  const BUILD_ID = '49';
 
   // Logical field roles a recorded step can fulfil.
   const ROLE = {

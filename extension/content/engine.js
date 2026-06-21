@@ -895,68 +895,165 @@
   function isSelectedProcedureTable(table) {
     if (!table || table.nodeType !== 1) return false;
     const text = normalizeMatchKey(table.textContent || '');
-    return text.includes('procedure') && text.includes('actions') && text.includes('role') && table.querySelector('select');
+    return text.includes('procedure') && text.includes('actions') && text.includes('role');
   }
 
-  function findSelectedProcedureRows() {
-    const rows = [];
-    const seen = new Set();
-    const selectors = [
-      '#selectedProcs tr.selected_proc',
-      '#selectedProcs .selected_proc',
-      // Live MedHub: filled procedure rows are <tr id="prow_N"> (un-hidden);
-      // empty slots keep the `hidden` class and prow_0 is the placeholder.
-      '#selected_procedures tr[id^="prow_"]:not(.hidden)',
-      '#selected_procedures li.proc_chip',
-      '#selected_procedures li',
-      'tr.selected_proc',
-      '.selected_proc'
-    ];
-    for (const sel of selectors) {
-      try {
-        for (const row of document.querySelectorAll(sel)) {
-          if (!row || row.id === 'noProcRow' || row.id === 'prow_0' || seen.has(row)) continue;
-          seen.add(row);
-          rows.push(row);
-        }
-      } catch (_) {}
-    }
-    for (const table of document.querySelectorAll('table')) {
-      if (!isSelectedProcedureTable(table)) continue;
-      for (const row of table.querySelectorAll('tr')) {
-        if (!DOM.isVisible(row) || row.id === 'prow_0' || seen.has(row)) continue;
-        if (!findProcedureRemoveControl(row)) continue;
-        seen.add(row);
-        rows.push(row);
+  function findProceduresTable() {
+    const byId = document.getElementById('selected_procedures');
+    if (byId) return byId;
+    for (const heading of document.querySelectorAll('h1, h2, h3, .mhSectionHeader, caption')) {
+      const text = (heading.textContent || '').trim();
+      if (!/^procedures\b/i.test(text)) continue;
+      let sibling = heading.nextElementSibling;
+      while (sibling) {
+        if (sibling.tagName === 'TABLE') return sibling;
+        const nested = sibling.querySelector && sibling.querySelector('table');
+        if (nested) return nested;
+        sibling = sibling.nextElementSibling;
       }
     }
-    return rows;
-  }
-
-  function findProcedureRemoveControl(row) {
-    if (!row) return null;
-    const candidates = row.querySelectorAll('a, button, [role="button"], input[type="button"], input[type="image"]');
-    for (const el of candidates) {
-      if (isProcedureRemoveControl(el)) return el;
+    for (const table of document.querySelectorAll('table')) {
+      if (isSelectedProcedureTable(table)) return table;
     }
     return null;
   }
 
-  async function clearSelectedProcedures(fieldDelayMs = 100) {
-    let cleared = 0;
-    const pause = Math.min(fieldDelayMs, 150);
-    for (let attempt = 0; attempt < 30; attempt++) {
-      let clicked = false;
-      for (const row of findSelectedProcedureRows()) {
-        const btn = findProcedureRemoveControl(row);
-        if (!btn || !DOM.isVisible(btn)) continue;
-        btn.click();
-        cleared++;
-        clicked = true;
-        await sleep(pause);
+  function isProcedureTableDeleteControl(el) {
+    if (!el || el.nodeType !== 1) return false;
+    if (el.closest('#procedures_list, #AddStandardProcedure')) return false;
+    const label = `${el.getAttribute('aria-label') || ''} ${el.textContent || ''} ${el.value || ''}`;
+    return /\bdelete\b/i.test(label) || isProcedureRemoveControl(el);
+  }
+
+  function isVisibleProcedureRow(row) {
+    if (!row || row.nodeType !== 1) return false;
+    if (row.id === 'prow_0' || row.id === 'noProcRow') return false;
+    const rowText = normalizeMatchKey(row.textContent || '');
+    if (rowText.includes('noprocedures') || rowText.includes('norequired')) return false;
+    if (row.id && /^prow_\d+$/.test(row.id)) {
+      const cls = String(row.className || '');
+      if (/\bhidden\b/.test(cls)) return false;
+      const titleEl = document.getElementById(row.id + '_title');
+      if (titleEl && (titleEl.textContent || '').trim()) return true;
+      return DOM.isVisible(row);
+    }
+    return DOM.isVisible(row);
+  }
+
+  function findVisibleProcedureRows() {
+    const rows = [];
+    const seen = new Set();
+    const table = findProceduresTable();
+    if (table) {
+      for (const row of table.querySelectorAll('tr')) {
+        if (!isVisibleProcedureRow(row) || seen.has(row)) continue;
+        seen.add(row);
+        rows.push(row);
       }
-      if (!clicked) break;
-      await sleep(80);
+    }
+    for (const row of document.querySelectorAll('tr[id^="prow_"]')) {
+      if (seen.has(row)) continue;
+      if (!isVisibleProcedureRow(row)) continue;
+      seen.add(row);
+      rows.push(row);
+    }
+    return rows;
+  }
+
+  function procedureDeleteIndexFromControl(el) {
+    if (!el) return null;
+    const href = el.getAttribute('href') || '';
+    const onclick = el.getAttribute('onclick') || '';
+    const hay = `${href} ${onclick}`;
+    const m = hay.match(/procedures_delete\s*\(\s*(\d+)\s*\)/);
+    return m ? Number(m[1]) : null;
+  }
+
+  function invokeProcedureDelete(control) {
+    if (!control) return false;
+    const idx = procedureDeleteIndexFromControl(control);
+    if (idx != null && typeof window.procedures_delete === 'function') {
+      window.procedures_delete(idx);
+      return true;
+    }
+    try {
+      control.click();
+      return true;
+    } catch (_) {}
+    return false;
+  }
+
+  function findProcedureDeleteButtons() {
+    const buttons = [];
+    const seen = new Set();
+    for (const row of findVisibleProcedureRows()) {
+      for (const el of row.querySelectorAll('a, button, input, [role="button"]')) {
+        if (!isProcedureTableDeleteControl(el)) continue;
+        if (seen.has(el)) continue;
+        seen.add(el);
+        buttons.push(el);
+      }
+    }
+    const table = findProceduresTable();
+    if (table) {
+      for (const el of table.querySelectorAll(
+        'a[href*="procedures_delete"], button[onclick*="procedures_delete"], [onclick*="procedures_delete"]'
+      )) {
+        if (seen.has(el)) continue;
+        const row = el.closest('tr');
+        if (row && !isVisibleProcedureRow(row)) continue;
+        if (!isProcedureTableDeleteControl(el)) continue;
+        seen.add(el);
+        buttons.push(el);
+      }
+    }
+    return buttons;
+  }
+
+  async function clearSelectedProcedures(fieldDelayMs = 100) {
+    const table = findProceduresTable();
+    if (table && typeof table.scrollIntoView === 'function') {
+      try {
+        table.scrollIntoView({ block: 'center' });
+      } catch (_) {}
+    }
+    let cleared = 0;
+    const pause = Math.max(80, Math.min(fieldDelayMs, 150));
+    for (let attempt = 0; attempt < 40; attempt++) {
+      let acted = false;
+      for (const row of findVisibleProcedureRows()) {
+        if (abortFlag) break;
+        const prowMatch = row.id && row.id.match(/^prow_(\d+)$/);
+        if (prowMatch && typeof window.procedures_delete === 'function') {
+          window.procedures_delete(Number(prowMatch[1]));
+          cleared++;
+          acted = true;
+          await sleep(pause);
+          continue;
+        }
+        for (const el of row.querySelectorAll('a, button, input, [role="button"]')) {
+          if (!isProcedureTableDeleteControl(el)) continue;
+          invokeProcedureDelete(el);
+          cleared++;
+          acted = true;
+          await sleep(pause);
+          break;
+        }
+      }
+      if (!acted) {
+        const buttons = findProcedureDeleteButtons();
+        if (!buttons.length) break;
+        for (const btn of buttons) {
+          if (abortFlag) break;
+          invokeProcedureDelete(btn);
+          cleared++;
+          await sleep(pause);
+        }
+        acted = buttons.length > 0;
+      }
+      if (!findVisibleProcedureRows().length) break;
+      if (!acted) break;
+      await sleep(120);
     }
     return cleared;
   }

@@ -123,6 +123,32 @@ module.exports = async function run() {
     console.log('  engine.medhub-live: clears prior procedures via procedures_delete before next row.');
   }
 
+  // ---- Stale Ablation + Coronary from prior rows cleared before next dry-run row ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { document, window, ENGINE } = page;
+    window.procedures_add('1', '--', 'Ablation');
+    window.procedures_add('2', '--', 'Coronary Angiography/Diagnostic Cath');
+    assert.deepStrictEqual(
+      selectedTitles(document),
+      ['Ablation', 'Coronary Angiography/Diagnostic Cath'],
+      'pre-seeded stale procedures'
+    );
+    const recipe = buildRecipe(page.MSG);
+    const result = await ENGINE.runRow(
+      recipe,
+      { ...row, procedures: ['Colonoscopy'] },
+      { dryRun: true, fieldDelayMs: 0, typeCharDelayMs: 0 }
+    );
+    assert.ok(result.ok, JSON.stringify(result.actions.filter((a) => a.outcome !== 'success')));
+    assert.ok(
+      result.actions.some((a) => (a.detail || '').includes('Cleared')),
+      'logs procedure cleanup'
+    );
+    assert.deepStrictEqual(selectedTitles(document), ['Colonoscopy'], 'only new row procedure remains');
+    console.log('  engine.medhub-live: clears stale Ablation/Coronary before dry-run row.');
+  }
+
   // ---- Procedure clearing fallback: table has headers/Delete buttons but no expected id ----
   {
     const page = createPage('medhub-procedure-log-live.html');
