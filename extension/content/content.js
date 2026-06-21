@@ -148,16 +148,31 @@
 
       case MSG.RUN_ROW: {
         const { recipe, row, index, total, dryRun, fieldDelayMs } = message.payload;
+        let rowDoneSent = false;
+        const sendRowDone = (result) => {
+          if (rowDoneSent) return;
+          rowDoneSent = true;
+          toPanel(MSG.ROW_DONE, { index, total, result, mrn: row.mrn });
+        };
         engine().runRow(recipe, row, {
           dryRun,
           fieldDelayMs,
           index,
           total,
-          onAction: (entry) => toPanel(MSG.ACTION_LOG, { index, entry })
+          onAction: (entry) => toPanel(MSG.ACTION_LOG, { index, entry }),
+          onSubmitCommitted: (result) => {
+            emitDebug('run:submit-committed', {
+              index,
+              total,
+              mrn: row.mrn || '',
+              actionCount: Array.isArray(result?.actions) ? result.actions.length : 0
+            });
+            sendRowDone(result);
+          }
         })
           .then((result) => {
             overlay().hideBadge();
-            toPanel(MSG.ROW_DONE, { index, total, result, mrn: row.mrn });
+            sendRowDone(result);
           })
           .catch((err) => {
             toPanel(MSG.ENGINE_ERROR, { index, error: err.message });

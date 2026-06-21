@@ -1556,7 +1556,7 @@
   /**
    * @param {object} recipe
    * @param {object} row normalized { date, supervisor, mrn, procedures:[], location? }
-   * @param {object} opts { dryRun, onAction, fieldDelayMs, index, total }
+   * @param {object} opts { dryRun, onAction, onSubmitCommitted, fieldDelayMs, index, total }
    * @returns {Promise<{ok:boolean, actions:Array}>}
    */
   async function runRow(recipe, row, opts = {}) {
@@ -1564,6 +1564,7 @@
     const {
       dryRun = false,
       onAction = () => {},
+      onSubmitCommitted = () => {},
       fieldDelayMs = 200,
       autocompleteTimeoutMs,
       typeCharDelayMs,
@@ -1856,6 +1857,7 @@
               logAnotherChecked: Boolean(findLogAnotherCheckbox()?.checked)
             });
             record({ field: step.field, role: step.role, outcome: 'success', detail: 'Submitted' });
+            onSubmitCommitted({ ok: true, actions: actions.slice(), submitted: true });
           }
         }
 
@@ -1940,6 +1942,7 @@
         outcome: 'success',
         detail: 'Submitted via Log Procedure fallback'
       });
+      onSubmitCommitted({ ok: true, actions: actions.slice(), submitted: true });
     }
 
     return { ok: true, actions };

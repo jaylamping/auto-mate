@@ -14,6 +14,8 @@
   const FORM_FIELD_KEYS = FORM_FIELDS.map((f) => f.key);
   const REQUIRED_FIELD_KEYS = FORM_FIELDS.filter((f) => f.required).map((f) => f.key);
   const FIELD_LABEL_BY_KEY = Object.fromEntries(FORM_FIELDS.map((f) => [f.key, f.label]));
+  const LIVE_ROW_READY_TIMEOUT_MS = 15000;
+  const LIVE_ROW_READY_POLL_MS = 350;
 
   const state = {
     recordedSteps: [],
@@ -40,6 +42,7 @@
 
   const $ = (sel) => document.querySelector(sel);
   const $$ = (sel) => Array.from(document.querySelectorAll(sel));
+  const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
   function toast(msg, ms = 2600) {
     const t = $('#toast');
@@ -570,7 +573,7 @@
     return chrome.tabs.sendMessage(tab.id, { type, payload });
   }
 
-  async function ensureInjected(tabId) {
+  async function ensureInjected(tabId, quiet = false) {
     try {
       const res = await chrome.tabs.sendMessage(tabId, { type: MSG.PING });
       if (res && res.type === MSG.PONG && res.buildId === BUILD_ID) return true;
@@ -591,9 +594,42 @@
       });
       return true;
     } catch (err) {
-      toast('Could not attach to this page. Reload the form tab and retry.');
+      if (!quiet) toast('Could not attach to this page. Reload the form tab and retry.');
       throw err;
     }
+  }
+
+  async function waitForRunTabReady(rowIndex) {
+    const started = Date.now();
+    let lastError = '';
+    sendDebugEvent('run:tab-ready:start', {
+      index: rowIndex,
+      timeoutMs: LIVE_ROW_READY_TIMEOUT_MS
+    });
+    while (Date.now() - started < LIVE_ROW_READY_TIMEOUT_MS) {
+      const stable = await assertRunTabStable(rowIndex);
+      if (!stable.ok) return stable;
+      try {
+        await ensureInjected(state.runTabId, true);
+        sendDebugEvent('run:tab-ready:resolved', {
+          index: rowIndex,
+          elapsedMs: Date.now() - started
+        });
+        return { ok: true };
+      } catch (err) {
+        lastError = err?.message || '';
+        await sleep(LIVE_ROW_READY_POLL_MS);
+      }
+    }
+    sendDebugEvent('run:tab-ready:timeout', {
+      index: rowIndex,
+      timeoutMs: LIVE_ROW_READY_TIMEOUT_MS,
+      lastError
+    });
+    return {
+      ok: false,
+      message: `Row ${rowIndex + 1}: the Procedures form did not finish loading after submit. Reload the form tab and retry.`
+    };
   }
 
   // ---- Messages from content ----
@@ -1383,6 +1419,15 @@
         logLine(tabCheck.message, 'failed');
         state.running = false;
         break;
+      }
+      if (!dryRun && i > 0) {
+        const readyCheck = await waitForRunTabReady(i);
+        if (!readyCheck.ok) {
+          toast(readyCheck.message);
+          logLine(readyCheck.message, 'failed');
+          state.running = false;
+          break;
+        }
       }
       const row = state.engineRows[i];
       const missing = missingRequiredValuesForRow(row);

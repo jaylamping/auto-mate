@@ -115,6 +115,28 @@ module.exports = async function run() {
     console.log('  engine.medhub-live: live run submitted the procedureform once.');
   }
 
+  // ---- Live run reports submit immediately for pages that unload after click ----
+  {
+    const page = createPage('medhub-procedure-log-live.html');
+    const { ENGINE, MSG } = page;
+    let committed = null;
+    const result = await ENGINE.runRow(buildRecipe(MSG), row, {
+      dryRun: false,
+      fieldDelayMs: 0,
+      typeCharDelayMs: 0,
+      onSubmitCommitted: (payload) => {
+        committed = payload;
+      }
+    });
+    assert.ok(result.ok, 'live run ok');
+    assert.ok(committed && committed.ok, 'submit committed callback fired');
+    assert.ok(
+      committed.actions.some((a) => a.role === MSG.ROLE.SUBMIT && a.outcome === 'success'),
+      'committed payload includes submit success'
+    );
+    console.log('  engine.medhub-live: live submit reports committed before navigation can interrupt.');
+  }
+
   // ---- Live run still submits when an older saved recipe is missing submit ----
   {
     const page = createPage('medhub-procedure-log-live.html');
