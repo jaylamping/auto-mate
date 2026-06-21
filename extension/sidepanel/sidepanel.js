@@ -262,7 +262,9 @@
       if (state.mapping[key]) continue;
       if (key === FIELD.LOCATION && (staticValueForField(key) || defaultStaticLocation())) continue;
       const documented =
-        key === FIELD.PROCEDURE ? isProcedureRegistered() : Boolean(state.formBindings[key]);
+        key === FIELD.PROCEDURE
+          ? isProcedureRegistered()
+          : Boolean(state.formBindings[key] || state.recordedSteps.some((s) => s._field === key));
       if (!documented) continue;
       const col = guessed[key];
       if (!col) continue;
