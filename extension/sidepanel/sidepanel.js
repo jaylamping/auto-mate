@@ -16,6 +16,9 @@
   const FIELD_LABEL_BY_KEY = Object.fromEntries(FORM_FIELDS.map((f) => [f.key, f.label]));
   const LIVE_ROW_READY_TIMEOUT_MS = 15000;
   const LIVE_ROW_READY_POLL_MS = 350;
+  const LIVE_POST_SUBMIT_NAV_TIMEOUT_MS = 20000;
+  const LIVE_POST_SUBMIT_NAV_GRACE_MS = 1500;
+  const LIVE_POST_SUBMIT_NAV_POLL_MS = 250;
 
   const state = {
     recordedSteps: [],
@@ -629,6 +632,55 @@
     return {
       ok: false,
       message: `Row ${rowIndex + 1}: the Procedures form did not finish loading after submit. Reload the form tab and retry.`
+    };
+  }
+
+  async function waitForPostSubmitNavigation(rowIndex) {
+    const started = Date.now();
+    let sawLoading = false;
+    let lastStatus = '';
+    let lastError = '';
+    sendDebugEvent('run:post-submit-nav:start', {
+      index: rowIndex,
+      timeoutMs: LIVE_POST_SUBMIT_NAV_TIMEOUT_MS,
+      graceMs: LIVE_POST_SUBMIT_NAV_GRACE_MS
+    });
+    while (Date.now() - started < LIVE_POST_SUBMIT_NAV_TIMEOUT_MS) {
+      if (!state.running) {
+        return { ok: false, aborted: true };
+      }
+      const stable = await assertRunTabStable(rowIndex);
+      if (!stable.ok) return stable;
+      try {
+        const tab = await chrome.tabs.get(state.runTabId);
+        lastStatus = tab?.status || '';
+        if (lastStatus === 'loading') sawLoading = true;
+        const graceElapsed = Date.now() - started >= LIVE_POST_SUBMIT_NAV_GRACE_MS;
+        if ((sawLoading && lastStatus === 'complete') || (!sawLoading && graceElapsed)) {
+          await ensureInjected(state.runTabId, true);
+          sendDebugEvent('run:post-submit-nav:resolved', {
+            index: rowIndex,
+            elapsedMs: Date.now() - started,
+            sawLoading,
+            status: lastStatus
+          });
+          return { ok: true };
+        }
+      } catch (err) {
+        lastError = err?.message || '';
+      }
+      await sleep(LIVE_POST_SUBMIT_NAV_POLL_MS);
+    }
+    sendDebugEvent('run:post-submit-nav:timeout', {
+      index: rowIndex,
+      timeoutMs: LIVE_POST_SUBMIT_NAV_TIMEOUT_MS,
+      sawLoading,
+      status: lastStatus,
+      lastError
+    });
+    return {
+      ok: false,
+      message: `Row ${rowIndex + 1}: the Procedures form did not finish reloading after submit. Reload the form tab and retry.`
     };
   }
 
@@ -1310,6 +1362,15 @@
   $('#btnRun').addEventListener('click', runSession);
   $('#btnStop').addEventListener('click', async () => {
     state.running = false;
+    sendDebugEvent('run:stop:requested', {
+      hasRowResolver: Boolean(state.rowResolver)
+    });
+    if (state.rowResolver) {
+      state.rowResolver({
+        index: -1,
+        result: { ok: false, actions: [], aborted: true, failedField: 'stopped' }
+      });
+    }
     try {
       await sendToTab(MSG.STOP_RUN);
     } catch (_) {}
@@ -1452,6 +1513,19 @@
       if (result.result && result.result.aborted) {
         logLine('Stopped during row.', 'aborted');
         break;
+      }
+      if (!dryRun && result.result?.submitted && i < state.engineRows.length - 1) {
+        const navCheck = await waitForPostSubmitNavigation(i);
+        if (navCheck.aborted) {
+          logLine('Session stopped by user.', 'aborted');
+          break;
+        }
+        if (!navCheck.ok) {
+          toast(navCheck.message);
+          logLine(navCheck.message, 'failed');
+          state.running = false;
+          break;
+        }
       }
     }
 
